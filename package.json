@@ -1,0 +1,33 @@
+{
+  "name": "rtf-reporting-tool",
+  "version": "1.0.0",
+  "description": "RTF (Risk-Bearing Capacity) Reporting Tool for German Banks - Bundesbank Compliance",
+  "private": true,
+  "workspaces": [
+    "frontend",
+    "backend",
+    "shared"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "dev": "concurrently \"npm run dev -w backend\" \"npm run dev -w frontend\"",
+    "start": "npm run start --workspaces",
+    "test": "npm run test --workspaces",
+    "lint": "npm run lint --workspaces",
+    "type-check": "npm run type-check --workspaces",
+    "docker:build": "docker-compose build",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "db:migrate": "npm run db:migrate -w backend",
+    "db:seed": "npm run db:seed -w backend"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "husky": "^8.0.3",
+    "lint-staged": "^15.2.0"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  }
+}

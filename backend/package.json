@@ -1,0 +1,67 @@
+{
+  "name": "@rtf-tool/backend",
+  "version": "1.0.0",
+  "description": "RTF Reporting Tool Backend API - Deutsche Bundesbank Compliance",
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch --clear-screen=false src/server.ts",
+    "start": "node dist/server.js",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "lint": "eslint src --ext .ts",
+    "lint:fix": "eslint src --ext .ts --fix",
+    "type-check": "tsc --noEmit",
+    "db:migrate": "tsx src/scripts/migrate.ts",
+    "db:seed": "tsx src/scripts/seed.ts",
+    "db:reset": "tsx src/scripts/reset.ts",
+    "xbrl:parse": "tsx src/scripts/parse-xbrl-schemas.ts"
+  },
+  "dependencies": {
+    "@rtf-tool/shared": "file:../shared",
+    "fastify": "^4.24.3",
+    "fastify-plugin": "^4.5.1",
+    "@fastify/autoload": "^5.8.0",
+    "@fastify/swagger": "^8.12.0",
+    "@fastify/swagger-ui": "^2.1.0",
+    "@fastify/cors": "^8.4.0",
+    "@fastify/helmet": "^11.1.1",
+    "@fastify/jwt": "^7.2.4",
+    "@fastify/multipart": "^8.0.0",
+    "@fastify/rate-limit": "^9.0.1",
+    "pg": "^8.11.3",
+    "redis": "^4.6.10",
+    "bcryptjs": "^2.4.3",
+    "zod": "^3.22.4",
+    "libxmljs2": "^0.33.0",
+    "ajv": "^8.12.0",
+    "ajv-formats": "^2.1.1",
+    "winston": "^3.11.0",
+    "dotenv": "^16.3.1",
+    "luxon": "^3.4.4"
+  },
+  "devDependencies": {
+    "@types/node": "^18.19.0",
+    "@types/pg": "^8.10.9",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/luxon": "^3.3.7",
+    "@types/jest": "^29.5.8",
+    "@typescript-eslint/eslint-plugin": "^6.14.0",
+    "@typescript-eslint/parser": "^6.14.0",
+    "eslint": "^8.55.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.1",
+    "tsx": "^4.6.2",
+    "typescript": "^5.3.3"
+  },
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "node",
+    "testMatch": ["**/__tests__/**/*.test.ts"],
+    "collectCoverageFrom": [
+      "src/**/*.ts",
+      "!src/**/*.d.ts",
+      "!src/scripts/**"
+    ]
+  }
+}

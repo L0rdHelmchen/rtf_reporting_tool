@@ -1,0 +1,88 @@
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: rtf-postgres
+    environment:
+      POSTGRES_DB: rtf_reporting
+      POSTGRES_USER: rtf_user
+      POSTGRES_PASSWORD: rtf_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rtf_user -d rtf_reporting"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: rtf-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    container_name: rtf-backend
+    ports:
+      - "3001:3001"
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://rtf_user:rtf_password@postgres:5432/rtf_reporting
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: rtf-jwt-secret-development-key-32chars-min
+      API_PORT: 3001
+    volumes:
+      - ./backend:/app
+      - ./shared:/app/shared:ro
+      - backend_node_modules:/app/node_modules
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: npm run dev
+
+  # Frontend React App
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    container_name: rtf-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      REACT_APP_API_URL: http://localhost:3001/api/v1
+      CHOKIDAR_USEPOLLING: true
+    volumes:
+      - ./frontend:/app
+      - ./shared:/app/shared:ro
+      - frontend_node_modules:/app/node_modules
+    depends_on:
+      - backend
+    command: npm run dev
+
+volumes:
+  postgres_data:
+  redis_data:
+  backend_node_modules:
+  frontend_node_modules:
+
+networks:
+  default:
+    name: rtf-network
