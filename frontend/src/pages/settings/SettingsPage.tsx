@@ -1,13 +1,13 @@
 import React from 'react';
 import { Box, Typography } from '@mui/material';
 
-const XBRLPage: React.FC = () => (
+const SettingsPage: React.FC = () => (
   <Box p={3}>
-    <Typography variant="h4">XBRL Export</Typography>
+    <Typography variant="h4">Einstellungen</Typography>
     <Typography color="text.secondary" mt={1}>
       Diese Seite ist noch in Entwicklung.
     </Typography>
   </Box>
 );
 
-export default XBRLPage;
+export default SettingsPage;

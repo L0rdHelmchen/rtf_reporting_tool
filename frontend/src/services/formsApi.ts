@@ -1,5 +1,5 @@
 // RTF Reporting Tool - Forms API Service
-import { api } from './api';
+import api from './api';
 import { FormDefinition, FormInstance, FormStatus } from '@rtf-tool/shared';
 
 export interface FormListItem {

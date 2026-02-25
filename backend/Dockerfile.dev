@@ -1,10 +1,7 @@
 # RTF Reporting Tool - Backend Development Dockerfile
-FROM node:18-alpine
+# Build context: repo root
+FROM node:20-alpine
 
-# Set working directory
-WORKDIR /app
-
-# Install system dependencies
 RUN apk add --no-cache \
     python3 \
     make \
@@ -13,21 +10,26 @@ RUN apk add --no-cache \
     libxslt-dev \
     curl
 
-# Copy package files
+WORKDIR /app
+
+# Root package.json + lock für workspaces
 COPY package.json package-lock.json* ./
 
-# Install dependencies
-RUN npm install
+# Workspace package.json files
+COPY shared/package.json ./shared/
+COPY backend/package.json ./backend/
 
-# Copy source code
-COPY . .
+# Alle dependencies inkl. shared installieren (workspace-aware)
+RUN npm install --legacy-peer-deps
 
-# Expose port
+# Shared source kopieren und bauen
+COPY shared/ ./shared/
+RUN npm run build -w shared
+
+# Backend source wird per Volume gemountet
+WORKDIR /app/backend
+
 EXPOSE 3001
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD curl -f http://localhost:3001/api/v1/health || exit 1
-
-# Start development server
 CMD ["npm", "run", "dev"]

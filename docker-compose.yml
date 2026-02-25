@@ -1,5 +1,4 @@
 services:
-  # PostgreSQL Database
   postgres:
     image: postgres:15-alpine
     container_name: rtf-postgres
@@ -18,7 +17,6 @@ services:
       timeout: 10s
       retries: 3
 
-  # Redis Cache
   redis:
     image: redis:7-alpine
     container_name: rtf-redis
@@ -33,11 +31,10 @@ services:
       timeout: 10s
       retries: 3
 
-  # Backend API
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile.dev
+      context: .
+      dockerfile: backend/Dockerfile.dev
     container_name: rtf-backend
     ports:
       - "3001:3001"
@@ -48,9 +45,10 @@ services:
       JWT_SECRET: rtf-jwt-secret-development-key-32chars-min
       API_PORT: 3001
     volumes:
-      - ./backend:/app
-      - ./shared:/app/shared:ro
-      - backend_node_modules:/app/node_modules
+      - ./backend:/app/backend    # Source live gemountet
+      - ./shared:/app/shared      # Shared live gemountet
+      - backend_node_modules:/app/node_modules   # node_modules aus Image
+    working_dir: /app/backend
     depends_on:
       postgres:
         condition: service_healthy
@@ -58,23 +56,23 @@ services:
         condition: service_healthy
     command: npm run dev
 
-  # Frontend React App
   frontend:
     build:
-      context: ./frontend
-      dockerfile: Dockerfile.dev
+      context: .
+      dockerfile: frontend/Dockerfile.dev
     container_name: rtf-frontend
     ports:
       - "3000:3000"
     environment:
-      REACT_APP_API_URL: http://localhost:3001/api/v1
-      CHOKIDAR_USEPOLLING: true
+      CHOKIDAR_USEPOLLING: "true"
     volumes:
-      - ./frontend:/app
-      - ./shared:/app/shared:ro
-      - frontend_node_modules:/app/node_modules
+      - ./frontend:/app/frontend  # Source live gemountet
+      - ./shared:/app/shared      # Shared live gemountet
+      - frontend_node_modules:/app/node_modules  # node_modules aus Image
+    working_dir: /app/frontend
     depends_on:
-      - backend
+      backend:
+        condition: service_started
     command: npm run dev
 
 volumes:
