@@ -3,9 +3,9 @@ services:
     image: postgres:15-alpine
     container_name: rtf-postgres
     environment:
-      POSTGRES_DB: rtf_reporting
-      POSTGRES_USER: rtf_user
-      POSTGRES_PASSWORD: rtf_password
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
       - "5432:5432"
     volumes:
@@ -45,12 +45,12 @@ services:
     ports:
       - "3001:3001"
     environment:
-      NODE_ENV: development
-      DATABASE_URL: postgresql://rtf_user:rtf_password@postgres:5432/rtf_reporting
-      REDIS_URL: redis://redis:6379
-      JWT_SECRET: rtf-jwt-secret-development-key-32chars-min
-      API_PORT: 3001
-      RATE_LIMIT_MAX_REQUESTS: 1000
+      NODE_ENV: ${NODE_ENV}
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      API_PORT: ${API_PORT}
+      RATE_LIMIT_MAX_REQUESTS: ${RATE_LIMIT_MAX_REQUESTS}
     volumes:
       - ./backend:/app/backend    # Source live gemountet
       - ./shared:/app/shared      # Shared live gemountet

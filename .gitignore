@@ -4,6 +4,7 @@ shared/dist/
 **/dist/
 .env
 .env.*
+!.env.example
 *.log
 .DS_Store
 **/.DS_Store

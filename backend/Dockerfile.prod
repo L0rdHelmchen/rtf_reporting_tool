@@ -1,0 +1,60 @@
+# RTF Reporting Tool - Backend Production Dockerfile
+# Build context: repo root (docker-compose build context: .)
+# Two-stage build: full compile → minimal runtime (no devDeps, no compiler)
+
+# ── Stage 1: Builder ──────────────────────────────────────────────────────────
+FROM node:20-alpine AS builder
+
+RUN apk add --no-cache \
+    python3 \
+    make \
+    g++ \
+    libxml2-dev \
+    libxslt-dev
+
+WORKDIR /app
+
+# Package manifests first (layer cache; source changes don't bust this layer)
+COPY package.json package-lock.json* ./
+COPY shared/package.json ./shared/
+COPY backend/package.json ./backend/
+RUN npm install --legacy-peer-deps
+
+# Build shared library
+COPY shared/ ./shared/
+RUN npm run build -w shared
+
+# Build backend (TypeScript → JS)
+COPY backend/ ./backend/
+RUN npm run build -w backend
+
+# ── Stage 2: Production runtime ───────────────────────────────────────────────
+FROM node:20-alpine AS production
+
+# Runtime libs for libxmljs2 (native module) + health-check curl
+RUN apk add --no-cache libxml2 libxslt curl
+
+# Run as non-root user
+RUN addgroup -g 1001 -S nodejs && adduser -S backend -u 1001
+
+WORKDIR /app
+
+# Package manifests for production-only install
+COPY package.json package-lock.json* ./
+COPY shared/package.json ./shared/
+COPY backend/package.json ./backend/
+RUN npm install --legacy-peer-deps --omit=dev && npm cache clean --force
+
+# Copy compiled artifacts from builder
+COPY --from=builder /app/shared/dist ./shared/dist
+COPY --from=builder /app/backend/dist ./backend/dist
+
+RUN chown -R backend:nodejs /app
+USER backend
+
+WORKDIR /app/backend
+
+EXPOSE 3001
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD curl -f http://localhost:3001/health/ping || exit 1
+CMD ["node", "dist/server.js"]

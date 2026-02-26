@@ -1,43 +1,47 @@
 /**
  * RTF Reporting Tool - Form Routes
  *
- * API endpoints for form management with XBRL integration
+ * API endpoints for form management with XBRL integration.
+ * Form instance data is persisted in the form_instances table.
  */
 
 import { FastifyInstance, FastifyPluginOptions, FastifyRequest, FastifyReply } from 'fastify';
 import path from 'path';
 import { XBRLSchemaParser } from '../services/XBRLSchemaParser';
 import { XBRLGeneratorService } from '../services/XBRLGeneratorService';
-import { XBRLValidationService, ValidationContext } from '../services/XBRLValidationService';
+import { XBRLValidationService } from '../services/XBRLValidationService';
 import { FormStatus } from '@rtf-tool/shared';
+import { db } from '../lib/database';
+import { logger } from '../lib/logger';
 
-// Initialize XBRL services
+// Initialize XBRL services (singletons, shared across requests)
 const RTF_BASE_PATH = path.join(__dirname, '../../..');
 const schemaParser = new XBRLSchemaParser(RTF_BASE_PATH);
 const generatorService = new XBRLGeneratorService(schemaParser, RTF_BASE_PATH);
 const validationService = new XBRLValidationService(schemaParser, RTF_BASE_PATH);
 
-// Mock data store (in production, this would be a database)
-const formInstances = new Map<string, any>();
-
 export default async function formRoutes(
   fastify: FastifyInstance,
-  options: FastifyPluginOptions
+  _options: FastifyPluginOptions
 ) {
-  // Ensure XBRL services are initialized
+  // Require authentication for all form routes
+  fastify.addHook('preHandler', (fastify as any).authenticate);
+
+  // Ensure XBRL services are initialized once on server start
   fastify.addHook('onReady', async () => {
     try {
-      console.log('Initializing XBRL Schema Parser for forms...');
+      logger.info('Initializing XBRL Schema Parser for forms...');
       await schemaParser.parseRTFTaxonomy();
+      logger.info('XBRL Schema Parser ready');
     } catch (error) {
-      console.warn('XBRL taxonomy not available, forms API will return empty results:', error);
+      logger.warn('XBRL taxonomy not available, forms API will return empty results');
     }
   });
 
   /**
-   * Get all available forms from XBRL taxonomy
+   * GET / — list all available form definitions from XBRL taxonomy
    */
-  fastify.get('/', async (request: FastifyRequest, reply: FastifyReply) => {
+  fastify.get('/', async (_request: FastifyRequest, reply: FastifyReply) => {
     try {
       const forms = [...schemaParser.getForms().values()];
 
@@ -82,44 +86,48 @@ export default async function formRoutes(
       });
 
     } catch (error) {
-      console.error('Error retrieving forms:', error);
+      logger.error('Error retrieving forms', { error });
       return reply.code(500).send({
         success: false,
-        message: 'Failed to retrieve forms',
-        error: error instanceof Error ? error.message : 'Unknown error'
+        message: 'Failed to retrieve forms'
       });
     }
   });
 
   /**
-   * Get specific form definition with XBRL structure
+   * GET /:formId — form definition with XBRL structure + existing DB instances
    */
   fastify.get('/:formId', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const { formId } = request.params as { formId: string };
+      const user = (request as any).user;
 
-      const formDefinition = await schemaParser.getFormDefinition(formId);
+      const formDefinition = schemaParser.getFormDefinition(formId);
       if (!formDefinition) {
-        return reply.code(404).send({
-          success: false,
-          message: `Form not found: ${formId}`
-        });
+        return reply.code(404).send({ success: false, message: `Form not found: ${formId}` });
       }
 
       const statistics = await generatorService.getFormStatistics(formId);
       const validationSummary = await validationService.getValidationSummary(formId);
 
-      // Get any existing instances for this form (mock data)
-      const instances = Array.from(formInstances.entries())
-        .filter(([key]) => key.startsWith(`${formId}_`))
-        .map(([key, instance]) => ({
-          instanceId: key,
-          reportingPeriod: instance.reportingPeriod,
-          status: instance.status,
-          createdAt: instance.createdAt,
-          updatedAt: instance.updatedAt,
-          submittedAt: instance.submittedAt
-        }));
+      // Fetch existing DB instances for this user's institution
+      const instancesResult = await db.queryAs(
+        user.id,
+        `SELECT id, reporting_period, status, created_at, updated_at, submitted_at
+         FROM form_instances
+         WHERE institution_id = $1 AND form_code = $2
+         ORDER BY reporting_period DESC`,
+        [user.institutionId, formId]
+      );
+
+      const instances = instancesResult.rows.map(row => ({
+        instanceId: row.id,
+        reportingPeriod: row.reporting_period,
+        status: row.status,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+        submittedAt: row.submitted_at
+      }));
 
       return reply.send({
         success: true,
@@ -138,19 +146,138 @@ export default async function formRoutes(
       });
 
     } catch (error) {
-      console.error('Error retrieving form definition:', error);
+      logger.error('Error retrieving form definition', { error });
       return reply.code(500).send({
         success: false,
-        message: 'Failed to retrieve form definition',
-        error: error instanceof Error ? error.message : 'Unknown error'
+        message: 'Failed to retrieve form definition'
       });
     }
   });
 
   /**
-   * Create or update form instance
+   * GET /:formId/instance?reportingPeriod=YYYY-MM-DD — fetch saved instance from DB
+   */
+  fastify.get('/:formId/instance', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const { formId } = request.params as { formId: string };
+      const { reportingPeriod } = request.query as { reportingPeriod?: string };
+      const user = (request as any).user;
+
+      if (!reportingPeriod) {
+        return reply.code(400).send({ success: false, message: 'reportingPeriod query param required' });
+      }
+
+      const result = await db.queryAs(
+        user.id,
+        `SELECT id, form_code, reporting_period, status, form_data,
+                validation_errors, created_at, updated_at, submitted_at
+         FROM form_instances
+         WHERE institution_id = $1 AND form_code = $2 AND reporting_period = $3`,
+        [user.institutionId, formId, reportingPeriod]
+      );
+
+      if (result.rows.length === 0) {
+        return reply.code(404).send({
+          success: false,
+          message: `Form instance not found: ${formId} for period ${reportingPeriod}`
+        });
+      }
+
+      const row = result.rows[0];
+      return reply.send({
+        instanceId: row.id,
+        formDefinitionId: row.form_code,
+        reportingPeriod: row.reporting_period,
+        data: row.form_data,
+        status: row.status,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+        submittedAt: row.submitted_at,
+        validationErrors: row.validation_errors
+      });
+
+    } catch (error) {
+      logger.error('Error retrieving form instance', { error });
+      return reply.code(500).send({ success: false, message: 'Failed to retrieve form instance' });
+    }
+  });
+
+  /**
+   * POST /:formId/instance — create new form instance in DB
    */
   fastify.post('/:formId/instance', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const { formId } = request.params as { formId: string };
+      const { reportingPeriod, data = {} } = request.body as {
+        reportingPeriod: string;
+        data?: Record<string, any>;
+      };
+      const user = (request as any).user;
+
+      const validationResult = await validationService.validateFormData(
+        formId, data,
+        { formId, reportingPeriod, entityType: 'credit_institution', institutionSize: 'large', consolidationType: 'individual' }
+      );
+
+      const row = await db.transactionAs(user.id, async (client) => {
+        const insertResult = await client.query(
+          `INSERT INTO form_instances
+             (institution_id, form_code, reporting_period, status, form_data, validation_errors, created_by, updated_by)
+           VALUES ($1, $2, $3, 'draft', $4, $5, $6, $6)
+           RETURNING id, reporting_period, status, form_data, created_at, updated_at`,
+          [user.institutionId, formId, reportingPeriod,
+           JSON.stringify(data), JSON.stringify(validationResult.errors), user.id]
+        );
+        const r = insertResult.rows[0];
+        await client.query(
+          `INSERT INTO form_instance_history (form_instance_id, changed_by, change_type, new_data)
+           VALUES ($1, $2, 'created', $3)`,
+          [r.id, user.id, JSON.stringify(data)]
+        );
+        return r;
+      });
+
+      const instance = {
+        instanceId: row.id,
+        formDefinitionId: formId,
+        reportingPeriod: row.reporting_period,
+        data: row.form_data,
+        status: row.status,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at
+      };
+
+      return reply.send({
+        success: true,
+        message: 'Form instance created successfully',
+        data: {
+          instance,
+          validation: {
+            isValid: validationResult.isValid,
+            hasErrors: validationResult.errors.length > 0,
+            hasWarnings: validationResult.warnings.length > 0,
+            errorCount: validationResult.errors.length,
+            warningCount: validationResult.warnings.length
+          }
+        }
+      });
+
+    } catch (error: any) {
+      if (error.code === '23505') {
+        return reply.code(409).send({
+          success: false,
+          message: 'Form instance already exists for this period. Use PUT to update.'
+        });
+      }
+      logger.error('Error creating form instance', { error });
+      return reply.code(500).send({ success: false, message: 'Failed to create form instance' });
+    }
+  });
+
+  /**
+   * PUT /:formId/instance — update existing form instance in DB
+   */
+  fastify.put('/:formId/instance', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const { formId } = request.params as { formId: string };
       const { reportingPeriod, data, status } = request.body as {
@@ -158,46 +285,66 @@ export default async function formRoutes(
         data: Record<string, any>;
         status?: FormStatus;
       };
-
-      const instanceKey = `${formId}_${reportingPeriod}`;
-
-      // Validate form data
-      const validationContext: ValidationContext = {
-        formId,
-        reportingPeriod,
-        entityType: 'credit_institution',
-        institutionSize: 'large',
-        consolidationType: 'individual'
-      };
+      const user = (request as any).user;
 
       const validationResult = await validationService.validateFormData(
-        formId,
-        data,
-        validationContext
+        formId, data,
+        { formId, reportingPeriod, entityType: 'credit_institution', institutionSize: 'large', consolidationType: 'individual' }
       );
 
-      // Save instance (mock implementation)
-      const now = new Date().toISOString();
-      const existingInstance = formInstances.get(instanceKey);
+      const row = await db.transactionAs(user.id, async (client) => {
+        const prevResult = await client.query(
+          `SELECT id, form_data FROM form_instances
+           WHERE institution_id = $1 AND form_code = $2 AND reporting_period = $3`,
+          [user.institutionId, formId, reportingPeriod]
+        );
+        if (prevResult.rows.length === 0) return null;
+
+        const prev = prevResult.rows[0];
+
+        const updateResult = await client.query(
+          `UPDATE form_instances
+           SET form_data = $1,
+               status = COALESCE($2::form_status_enum, status),
+               validation_errors = $3,
+               updated_by = $4,
+               updated_at = NOW(),
+               version_number = version_number + 1
+           WHERE institution_id = $5 AND form_code = $6 AND reporting_period = $7
+           RETURNING id, reporting_period, status, form_data, created_at, updated_at`,
+          [JSON.stringify(data), status || null, JSON.stringify(validationResult.errors),
+           user.id, user.institutionId, formId, reportingPeriod]
+        );
+        const r = updateResult.rows[0];
+
+        await client.query(
+          `INSERT INTO form_instance_history (form_instance_id, changed_by, change_type, previous_data, new_data)
+           VALUES ($1, $2, 'updated', $3, $4)`,
+          [r.id, user.id, JSON.stringify(prev.form_data), JSON.stringify(data)]
+        );
+        return r;
+      });
+
+      if (!row) {
+        return reply.code(404).send({
+          success: false,
+          message: `Form instance not found: ${formId} for period ${reportingPeriod}`
+        });
+      }
 
       const instance = {
-        instanceId: instanceKey,
+        instanceId: row.id,
         formDefinitionId: formId,
-        reportingPeriod,
-        data,
-        status: status || 'draft',
-        createdAt: existingInstance?.createdAt || now,
-        updatedAt: now,
-        submittedAt: status === 'submitted' ? now : existingInstance?.submittedAt,
-        validatedAt: validationResult.isValid ? now : undefined,
-        validationResult
+        reportingPeriod: row.reporting_period,
+        data: row.form_data,
+        status: row.status,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at
       };
-
-      formInstances.set(instanceKey, instance);
 
       return reply.send({
         success: true,
-        message: 'Form instance saved successfully',
+        message: 'Form instance updated successfully',
         data: {
           instance,
           validation: {
@@ -211,227 +358,188 @@ export default async function formRoutes(
       });
 
     } catch (error) {
-      console.error('Error saving form instance:', error);
-      return reply.code(500).send({
-        success: false,
-        message: 'Failed to save form instance',
-        error: error instanceof Error ? error.message : 'Unknown error'
-      });
+      logger.error('Error updating form instance', { error });
+      return reply.code(500).send({ success: false, message: 'Failed to update form instance' });
     }
   });
 
   /**
-   * Get form instance data
+   * POST /:formId/validate — validate form data, save validation_errors to DB if instance exists
    */
-  fastify.get('/:formId/instance/:reportingPeriod', async (request: FastifyRequest, reply: FastifyReply) => {
+  fastify.post('/:formId/validate', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      const { formId, reportingPeriod } = request.params as {
-        formId: string;
+      const { formId } = request.params as { formId: string };
+      const { reportingPeriod, data } = request.body as {
         reportingPeriod: string;
+        data: Record<string, any>;
       };
+      const user = (request as any).user;
 
-      const instanceKey = `${formId}_${reportingPeriod}`;
-      const instance = formInstances.get(instanceKey);
+      const result = await validationService.validateFormData(
+        formId, data,
+        { formId, reportingPeriod, entityType: 'credit_institution', institutionSize: 'large', consolidationType: 'individual' }
+      );
 
-      if (!instance) {
+      // Persist validation errors if instance exists (best-effort)
+      await db.queryAs(
+        user.id,
+        `UPDATE form_instances
+         SET validation_errors = $1, updated_at = NOW()
+         WHERE institution_id = $2 AND form_code = $3 AND reporting_period = $4`,
+        [JSON.stringify(result.errors), user.institutionId, formId, reportingPeriod]
+      );
+
+      return reply.send({
+        success: result.isValid,
+        message: result.isValid ? 'Form data is valid' : 'Form data validation failed',
+        data: {
+          isValid: result.isValid,
+          errors: result.errors,
+          warnings: result.warnings,
+          errorCount: result.errors.length,
+          warningCount: result.warnings.length
+        }
+      });
+
+    } catch (error) {
+      logger.error('Error validating form', { error });
+      return reply.code(500).send({ success: false, message: 'Failed to validate form data' });
+    }
+  });
+
+  /**
+   * POST /:formId/submit — submit form for review
+   */
+  fastify.post('/:formId/submit', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const { formId } = request.params as { formId: string };
+      const { reportingPeriod } = request.body as { reportingPeriod: string };
+      const user = (request as any).user;
+
+      const row = await db.transactionAs(user.id, async (client) => {
+        const updateResult = await client.query(
+          `UPDATE form_instances
+           SET status = 'submitted',
+               submitted_at = NOW(),
+               updated_by = $1,
+               updated_at = NOW()
+           WHERE institution_id = $2 AND form_code = $3 AND reporting_period = $4
+             AND status IN ('draft', 'in_review')
+           RETURNING id, reporting_period, status, form_data, created_at, updated_at, submitted_at`,
+          [user.id, user.institutionId, formId, reportingPeriod]
+        );
+        if (updateResult.rows.length === 0) return null;
+
+        const r = updateResult.rows[0];
+        await client.query(
+          `INSERT INTO form_instance_history (form_instance_id, changed_by, change_type)
+           VALUES ($1, $2, 'submitted')`,
+          [r.id, user.id]
+        );
+        return r;
+      });
+
+      if (!row) {
         return reply.code(404).send({
           success: false,
-          message: `Form instance not found: ${formId} for period ${reportingPeriod}`
+          message: 'Form instance not found or already submitted'
         });
       }
 
       return reply.send({
         success: true,
-        message: 'Form instance retrieved successfully',
-        data: { instance }
-      });
-
-    } catch (error) {
-      console.error('Error retrieving form instance:', error);
-      return reply.code(500).send({
-        success: false,
-        message: 'Failed to retrieve form instance',
-        error: error instanceof Error ? error.message : 'Unknown error'
-      });
-    }
-  });
-
-  /**
-   * Validate form instance
-   */
-  fastify.post('/:formId/instance/:reportingPeriod/validate', async (request: FastifyRequest, reply: FastifyReply) => {
-    try {
-      const { formId, reportingPeriod } = request.params as {
-        formId: string;
-        reportingPeriod: string;
-      };
-
-      const { data, context } = request.body as {
-        data?: Record<string, any>;
-        context?: Partial<ValidationContext>;
-      };
-
-      const instanceKey = `${formId}_${reportingPeriod}`;
-      const instance = formInstances.get(instanceKey);
-
-      const formData = data || instance?.data || {};
-
-      const validationContext: ValidationContext = {
-        formId,
-        reportingPeriod,
-        entityType: context?.entityType || 'credit_institution',
-        institutionSize: context?.institutionSize || 'large',
-        consolidationType: context?.consolidationType || 'individual'
-      };
-
-      const result = await validationService.validateFormData(
-        formId,
-        formData,
-        validationContext
-      );
-
-      // Update instance with validation result if it exists
-      if (instance) {
-        instance.validationResult = result;
-        instance.validatedAt = new Date().toISOString();
-        formInstances.set(instanceKey, instance);
-      }
-
-      return reply.send({
-        success: true,
-        message: 'Form validation completed',
+        message: 'Form submitted successfully',
         data: {
-          validation: result,
-          summary: {
-            isValid: result.isValid,
-            errorCount: result.errors.length,
-            warningCount: result.warnings.length,
-            infoCount: result.infos.length,
-            rulesApplied: result.summary.totalRules,
-            rulesPassed: result.summary.passedRules,
-            rulesFailed: result.summary.failedRules
-          }
+          instanceId: row.id,
+          formDefinitionId: formId,
+          reportingPeriod: row.reporting_period,
+          data: row.form_data,
+          status: row.status,
+          submittedAt: row.submitted_at,
+          createdAt: row.created_at,
+          updatedAt: row.updated_at
         }
       });
 
     } catch (error) {
-      console.error('Error validating form instance:', error);
-      return reply.code(500).send({
-        success: false,
-        message: 'Failed to validate form instance',
-        error: error instanceof Error ? error.message : 'Unknown error'
-      });
+      logger.error('Error submitting form', { error });
+      return reply.code(500).send({ success: false, message: 'Failed to submit form' });
     }
   });
 
   /**
-   * Export form instance as XBRL
+   * POST /:formId/instance/:reportingPeriod/export — export as XBRL
    */
   fastify.post('/:formId/instance/:reportingPeriod/export', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      const { formId, reportingPeriod } = request.params as {
-        formId: string;
-        reportingPeriod: string;
-      };
+      const { formId, reportingPeriod } = request.params as { formId: string; reportingPeriod: string };
+      const { options } = request.body as { format?: string; options?: any };
+      const user = (request as any).user;
 
-      const { format, options } = request.body as {
-        format: 'xbrl' | 'xml' | 'pdf' | 'excel';
-        options?: any;
-      };
+      const result = await db.queryAs(
+        user.id,
+        `SELECT form_data FROM form_instances
+         WHERE institution_id = $1 AND form_code = $2 AND reporting_period = $3`,
+        [user.institutionId, formId, reportingPeriod]
+      );
 
-      const instanceKey = `${formId}_${reportingPeriod}`;
-      const instance = formInstances.get(instanceKey);
-
-      if (!instance) {
-        return reply.code(404).send({
-          success: false,
-          message: `Form instance not found: ${formId} for period ${reportingPeriod}`
-        });
+      if (result.rows.length === 0) {
+        return reply.code(404).send({ success: false, message: 'Form instance not found' });
       }
 
-      if (format === 'xbrl' || format === 'xml') {
-        // Generate XBRL document
-        const xbrlOptions = {
-          schemaRef: 'rtf-2023-12.xsd',
-          entityIdentifier: 'DE123456789',
-          entityIdentifierScheme: 'http://www.bundesbank.de',
-          reportingPeriod,
-          currency: 'EUR',
-          decimals: 0,
-          language: 'de',
-          ...options
-        };
+      const formData = result.rows[0].form_data;
 
-        const result = await generatorService.generateXBRLInstance(
-          formId,
-          instance.data,
-          xbrlOptions
-        );
+      const xbrlOptions = {
+        schemaRef: 'rtf-2023-12.xsd',
+        entityIdentifier: user.institutionId,
+        entityIdentifierScheme: 'http://www.bundesbank.de',
+        reportingPeriod,
+        currency: 'EUR',
+        decimals: 0,
+        language: 'de',
+        ...options
+      };
 
-        if (!result.success) {
-          return reply.code(400).send({
-            success: false,
-            message: 'Failed to generate XBRL document',
-            errors: result.errors
-          });
-        }
+      const xbrlResult = await generatorService.generateXBRLInstance(formId, formData, xbrlOptions);
 
-        const fileName = result.fileName || `${formId}_${reportingPeriod}.xbrl`;
-        const contentType = format === 'xbrl' ? 'application/xml' : 'text/xml';
-
-        return reply
-          .header('Content-Type', contentType)
-          .header('Content-Disposition', `attachment; filename="${fileName}"`)
-          .send(result.xbrlDocument);
-
-      } else {
-        // For PDF/Excel export, return a mock response
-        return reply.send({
-          success: true,
-          message: `${format.toUpperCase()} export feature coming soon`,
-          data: {
-            format,
-            formId,
-            reportingPeriod,
-            downloadUrl: `/api/forms/${formId}/instance/${reportingPeriod}/download/${format}`
-          }
-        });
+      if (!xbrlResult.success || !xbrlResult.xbrlDocument) {
+        return reply.code(400).send({ success: false, message: 'Failed to generate XBRL', errors: xbrlResult.errors });
       }
+
+      const fileName = xbrlResult.fileName || `${formId}_${reportingPeriod}.xbrl`;
+      return reply
+        .header('Content-Type', 'application/xml')
+        .header('Content-Disposition', `attachment; filename="${fileName}"`)
+        .send(xbrlResult.xbrlDocument);
 
     } catch (error) {
-      console.error('Error exporting form instance:', error);
-      return reply.code(500).send({
-        success: false,
-        message: 'Failed to export form instance',
-        error: error instanceof Error ? error.message : 'Unknown error'
-      });
+      logger.error('Error exporting form', { error });
+      return reply.code(500).send({ success: false, message: 'Failed to export form' });
     }
   });
 
-  /**
-   * Helper methods
-   */
+  // ── Helper methods ───────────────────────────────────────────────────────
+
   const getFormCategory = (formId: string): string => {
-    if (formId.startsWith('GRP')) return 'Group Information';
-    if (formId.startsWith('RSK')) return 'Risk Information';
-    if (formId.startsWith('RDP')) return 'Risk Covering Potential';
-    if (formId.startsWith('ILAAP')) return 'Liquidity Assessment';
-    if (formId.startsWith('KPL')) return 'Capital Planning';
+    const code = formId.toUpperCase();
+    if (code.includes('GRP')) return 'Group Information';
+    if (code.includes('RSK')) return 'Risk Information';
+    if (code.includes('RDP')) return 'Risk Covering Potential';
+    if (code.includes('ILAAP')) return 'Liquidity Assessment';
+    if (code.includes('KPL')) return 'Capital Planning';
     return 'Other';
   };
 
   const getFormCategories = (forms: any[]): Record<string, number> => {
     const categories: Record<string, number> = {};
     for (const form of forms) {
-      const category = form.category;
-      categories[category] = (categories[category] || 0) + 1;
+      categories[form.category] = (categories[form.category] || 0) + 1;
     }
     return categories;
   };
 
   const getFormComplexity = (statistics: any): 'low' | 'medium' | 'high' => {
-    const { totalFields, dimensionalFields, requiredFields } = statistics;
-
+    const { totalFields, dimensionalFields } = statistics;
     if (totalFields < 20 && dimensionalFields < 5) return 'low';
     if (totalFields < 50 && dimensionalFields < 15) return 'medium';
     return 'high';
@@ -439,17 +547,10 @@ export default async function formRoutes(
 
   const getEstimatedCompletionTime = (statistics: any): string => {
     const { totalFields, requiredFields, dimensionalFields } = statistics;
-
-    const baseTime = requiredFields * 2; // 2 minutes per required field
-    const dimensionalTime = dimensionalFields * 3; // 3 minutes per dimensional field
-    const optionalTime = (totalFields - requiredFields) * 0.5; // 30 seconds per optional field
-
-    const totalMinutes = Math.ceil(baseTime + dimensionalTime + optionalTime);
-
+    const totalMinutes = Math.ceil(requiredFields * 2 + dimensionalFields * 3 + (totalFields - requiredFields) * 0.5);
     if (totalMinutes < 60) return `${totalMinutes} minutes`;
     const hours = Math.floor(totalMinutes / 60);
     const minutes = totalMinutes % 60;
     return `${hours} hour${hours > 1 ? 's' : ''}${minutes > 0 ? ` ${minutes} minutes` : ''}`;
   };
-
 }

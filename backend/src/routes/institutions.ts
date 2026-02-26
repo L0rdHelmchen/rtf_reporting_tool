@@ -5,6 +5,9 @@ export default async function institutionRoutes(
   fastify: FastifyInstance,
   options: FastifyPluginOptions
 ) {
+  // Require authentication for all institution routes
+  fastify.addHook('preHandler', (fastify as any).authenticate);
+
   // Get institution details
   fastify.get('/:id', async (request) => {
     const { id } = request.params as { id: string };

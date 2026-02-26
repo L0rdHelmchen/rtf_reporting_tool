@@ -10,6 +10,7 @@ import fs from 'fs/promises';
 import { XBRLSchemaParser } from '../services/XBRLSchemaParser';
 import { XBRLGeneratorService, XBRLInstanceOptions } from '../services/XBRLGeneratorService';
 import { XBRLValidationService, ValidationContext } from '../services/XBRLValidationService';
+import { logger } from '../lib/logger';
 
 // Initialize services
 const RTF_BASE_PATH = path.join(__dirname, '../../..');
@@ -81,14 +82,17 @@ export default async function xbrlRoutes(
   fastify: FastifyInstance,
   options: FastifyPluginOptions
 ) {
+  // Require authentication for all XBRL routes
+  fastify.addHook('preHandler', (fastify as any).authenticate);
+
   // Initialize services on server start
   fastify.addHook('onReady', async () => {
     try {
-      console.log('Initializing XBRL Schema Parser...');
+      logger.info('Initializing XBRL Schema Parser...');
       await schemaParser.parseRTFTaxonomy();
-      console.log('XBRL Schema Parser initialized successfully');
+      logger.info('XBRL Schema Parser initialized successfully');
     } catch (error) {
-      console.warn('XBRL taxonomy not available, XBRL API will return empty results:', error);
+      logger.warn('XBRL taxonomy not available, XBRL API will return empty results');
     }
   });
 
@@ -105,7 +109,7 @@ export default async function xbrlRoutes(
           options: XBRLInstanceOptions;
         };
 
-        console.log(`Generating XBRL for form ${formId}`);
+        logger.info(`Generating XBRL for form ${formId}`);
 
         const result = await generatorService.generateXBRLInstance(formId, formData, options);
 
@@ -128,7 +132,7 @@ export default async function xbrlRoutes(
         });
 
       } catch (error) {
-        console.error('XBRL generation error:', error);
+        logger.error('XBRL generation error', { error });
         return reply.code(500).send({
           success: false,
           message: 'Internal server error during XBRL generation',
@@ -151,7 +155,7 @@ export default async function xbrlRoutes(
           context: ValidationContext;
         };
 
-        console.log(`Validating form data for ${formId}`);
+        logger.info(`Validating form data for ${formId}`);
 
         const result = await validationService.validateFormData(formId, formData, context);
 
@@ -168,7 +172,7 @@ export default async function xbrlRoutes(
         });
 
       } catch (error) {
-        console.error('Form validation error:', error);
+        logger.error('Form validation error', { error });
         return reply.code(500).send({
           success: false,
           message: 'Internal server error during form validation',
@@ -190,7 +194,7 @@ export default async function xbrlRoutes(
           schemaPath?: string;
         };
 
-        console.log('Validating XBRL document');
+        logger.info('Validating XBRL document');
 
         const result = await validationService.validateXBRLDocument(xbrlContent);
 
@@ -207,7 +211,7 @@ export default async function xbrlRoutes(
         });
 
       } catch (error) {
-        console.error('XBRL validation error:', error);
+        logger.error('XBRL validation error', { error });
         return reply.code(500).send({
           success: false,
           message: 'Internal server error during XBRL validation',
@@ -244,7 +248,7 @@ export default async function xbrlRoutes(
       });
 
     } catch (error) {
-      console.error('Error retrieving form definition:', error);
+      logger.error('Error retrieving form definition', { error });
       return reply.code(500).send({
         success: false,
         message: 'Internal server error retrieving form definition',
@@ -275,7 +279,7 @@ export default async function xbrlRoutes(
       });
 
     } catch (error) {
-      console.error('Error retrieving forms list:', error);
+      logger.error('Error retrieving forms list', { error });
       return reply.code(500).send({
         success: false,
         message: 'Internal server error retrieving forms list',
@@ -299,7 +303,7 @@ export default async function xbrlRoutes(
       });
 
     } catch (error) {
-      console.error('Error retrieving validation rules:', error);
+      logger.error('Error retrieving validation rules', { error });
       return reply.code(500).send({
         success: false,
         message: 'Internal server error retrieving validation rules',
@@ -339,7 +343,7 @@ export default async function xbrlRoutes(
         .send(result.xbrlDocument);
 
     } catch (error) {
-      console.error('XBRL export error:', error);
+      logger.error('XBRL export error', { error });
       return reply.code(500).send({
         success: false,
         message: 'Internal server error during XBRL export',
@@ -368,7 +372,7 @@ export default async function xbrlRoutes(
         });
       }
 
-      console.log(`Processing batch generation for ${requests.length} forms`);
+      logger.info(`Processing batch generation for ${requests.length} forms`);
 
       const results = await generatorService.batchGenerateXBRL(requests);
 
@@ -389,7 +393,7 @@ export default async function xbrlRoutes(
       });
 
     } catch (error) {
-      console.error('Batch generation error:', error);
+      logger.error('Batch generation error', { error });
       return reply.code(500).send({
         success: false,
         message: 'Internal server error during batch generation',
@@ -417,7 +421,7 @@ export default async function xbrlRoutes(
       });
 
     } catch (error) {
-      console.error('Error retrieving taxonomy info:', error);
+      logger.error('Error retrieving taxonomy info', { error });
       return reply.code(500).send({
         success: false,
         message: 'Internal server error retrieving taxonomy info',
@@ -450,7 +454,7 @@ export default async function xbrlRoutes(
       });
 
     } catch (error) {
-      console.error('XBRL health check failed:', error);
+      logger.error('XBRL health check failed', { error });
       return reply.code(503).send({
         success: false,
         message: 'XBRL services unhealthy',

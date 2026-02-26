@@ -107,6 +107,68 @@ class Database {
     await client.query('SELECT set_config($1, $2, true)', ['app.current_user_id', userId]);
   }
 
+  /**
+   * Execute a single query with RLS user context.
+   * The context is set within a transaction so it cannot leak to other pool clients.
+   */
+  async queryAs<T = any>(userId: string, text: string, params?: any[]): Promise<QueryResult<T>> {
+    const client = await this.pool.connect();
+    const start = Date.now();
+    try {
+      await client.query('BEGIN');
+      await client.query("SELECT set_config('app.current_user_id', $1, true)", [userId]);
+      const result = await client.query<T>(text, params);
+      await client.query('COMMIT');
+
+      const duration = Date.now() - start;
+      logger.debug('Database query executed (with user context)', {
+        query: text.substring(0, 100) + (text.length > 100 ? '...' : ''),
+        duration: `${duration}ms`,
+        rows: result.rowCount
+      });
+
+      return result;
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => {});
+      logger.error('Database query failed (with user context)', {
+        query: text.substring(0, 100) + (text.length > 100 ? '...' : ''),
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Execute multiple queries atomically with RLS user context.
+   * Use this when a single request needs to run several DB statements together.
+   */
+  async transactionAs<T>(
+    userId: string,
+    callback: (client: PoolClient) => Promise<T>
+  ): Promise<T> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query("SELECT set_config('app.current_user_id', $1, true)", [userId]);
+      logger.debug('Database transaction started (with user context)');
+
+      const result = await callback(client);
+
+      await client.query('COMMIT');
+      logger.debug('Database transaction committed');
+
+      return result;
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => {});
+      logger.debug('Database transaction rolled back');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   // Health check
   async healthCheck(): Promise<{ status: string; details: any }> {
     try {
