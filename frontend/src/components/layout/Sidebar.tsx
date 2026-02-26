@@ -63,7 +63,17 @@ const Sidebar: React.FC = () => {
   };
 
   const isActive = (path: string) => {
-    return location.pathname === path || location.pathname.startsWith(path + '/');
+    const [pathname, search] = path.split('?');
+    if (location.pathname !== pathname && !location.pathname.startsWith(pathname + '/')) {
+      return false;
+    }
+    if (!search) return true;
+    const linkParams = new URLSearchParams(search);
+    const currentParams = new URLSearchParams(location.search);
+    for (const [key, value] of linkParams.entries()) {
+      if (currentParams.get(key) !== value) return false;
+    }
+    return true;
   };
 
   const hasRole = (requiredRoles?: string[]) => {

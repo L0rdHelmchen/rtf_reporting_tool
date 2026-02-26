@@ -147,7 +147,7 @@ const FormRenderer: React.FC<FormRendererProps> = ({
             }
             break;
           case 'di5':
-            fieldSchema = z.date();
+            fieldSchema = z.string();
             break;
           case 'bi7':
             fieldSchema = z.boolean();

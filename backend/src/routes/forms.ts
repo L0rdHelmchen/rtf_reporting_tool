@@ -41,9 +41,30 @@ export default async function formRoutes(
   /**
    * GET / — list all available form definitions from XBRL taxonomy
    */
-  fastify.get('/', async (_request: FastifyRequest, reply: FastifyReply) => {
+  fastify.get('/', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      const forms = [...schemaParser.getForms().values()];
+      const query = request.query as {
+        category?: string;
+        search?: string;
+        page?: string;
+        limit?: string;
+      };
+
+      let forms = [...schemaParser.getForms().values()];
+
+      // Filter by category (e.g. GRP, RSK, RDP, ILAAP, KPL, OTHER)
+      if (query.category) {
+        const cat = query.category.toUpperCase();
+        forms = forms.filter(f => getFormCategory(f.code) === cat);
+      }
+
+      // Filter by search term (code or name)
+      if (query.search) {
+        const term = query.search.toLowerCase();
+        forms = forms.filter(
+          f => f.code.toLowerCase().includes(term) || f.name.toLowerCase().includes(term)
+        );
+      }
 
       const formsWithMetadata = await Promise.all(
         forms.map(async (form: import('../services/XBRLSchemaParser').FormDefinition) => {
@@ -522,12 +543,12 @@ export default async function formRoutes(
 
   const getFormCategory = (formId: string): string => {
     const code = formId.toUpperCase();
-    if (code.includes('GRP')) return 'Group Information';
-    if (code.includes('RSK')) return 'Risk Information';
-    if (code.includes('RDP')) return 'Risk Covering Potential';
-    if (code.includes('ILAAP')) return 'Liquidity Assessment';
-    if (code.includes('KPL')) return 'Capital Planning';
-    return 'Other';
+    if (code.startsWith('GRP') || code.includes('GRP')) return 'GRP';
+    if (code.startsWith('RSK') || code.includes('RSK')) return 'RSK';
+    if (code.startsWith('RDP') || code.includes('RDP')) return 'RDP';
+    if (code.startsWith('ILAAP') || code.includes('ILAAP')) return 'ILAAP';
+    if (code.startsWith('KPL') || code.includes('KPL')) return 'KPL';
+    return 'OTHER';
   };
 
   const getFormCategories = (forms: any[]): Record<string, number> => {

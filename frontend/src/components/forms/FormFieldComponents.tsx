@@ -15,6 +15,7 @@ import {
   Chip
 } from '@mui/material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
+import { DateTime } from 'luxon';
 import { Controller, Control } from 'react-hook-form';
 
 // Base field props
@@ -204,9 +205,10 @@ export const DateFieldDI5: React.FC<BaseFieldProps> = ({
     rules={{ required: required ? 'Dieses Feld ist erforderlich' : false }}
     render={({ field, fieldState }) => (
       <DatePicker
-        {...field}
         label={label}
         disabled={disabled}
+        value={field.value ? DateTime.fromISO(field.value) : null}
+        onChange={(val) => field.onChange(val ? (val as DateTime).toISODate() : null)}
         slotProps={{
           textField: {
             fullWidth: true,

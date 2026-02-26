@@ -36,7 +36,7 @@ import {
   Download,
   Upload
 } from '@mui/icons-material';
-import { Link as RouterLink, useNavigate } from 'react-router-dom';
+import { Link as RouterLink, useNavigate, useSearchParams } from 'react-router-dom';
 import { useDebounce } from 'use-debounce';
 import { FORM_CATEGORY_NAMES_DE, FormStatus } from '@rtf-tool/shared';
 import { formsApi, FormListItem, FormSearchParams } from '../../services/formsApi';
@@ -141,6 +141,7 @@ const NewFormDialog: React.FC<NewFormDialogProps> = ({
 
 const FormsPage: React.FC = () => {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   // State management
   const [forms, setForms] = useState<FormListItem[]>([]);
@@ -155,11 +156,17 @@ const FormsPage: React.FC = () => {
   // Dialog state
   const [newFormDialogOpen, setNewFormDialogOpen] = useState(false);
 
-  // Filter state
+  // Filter state – initialized from URL query params
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState(searchParams.get('category') || '');
   const [selectedStatus, setSelectedStatus] = useState<FormStatus | ''>('');
   const [selectedPeriod, setSelectedPeriod] = useState('');
+
+  // Sync selectedCategory when URL changes (e.g. sidebar click)
+  useEffect(() => {
+    setSelectedCategory(searchParams.get('category') || '');
+    setCurrentPage(1);
+  }, [searchParams]);
 
   // Debounced search
   const [debouncedSearchTerm] = useDebounce(searchTerm, 500);
@@ -221,7 +228,12 @@ const FormsPage: React.FC = () => {
 
   // Event handlers
   const handleCategoryFilter = (category: string) => {
-    setSelectedCategory(category === selectedCategory ? '' : category);
+    const next = category === selectedCategory ? '' : category;
+    if (next) {
+      setSearchParams({ category: next });
+    } else {
+      setSearchParams({});
+    }
     setCurrentPage(1);
   };
 
