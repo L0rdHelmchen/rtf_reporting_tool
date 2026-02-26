@@ -8,6 +8,7 @@
 import { libxmljs } from 'libxmljs2';
 import { XBRLSchemaParser } from './XBRLSchemaParser';
 import { ValidationError } from './XBRLGeneratorService';
+import { ValueAssertionEvaluator } from './ValueAssertionEvaluator';
 import path from 'path';
 import fs from 'fs/promises';
 
@@ -46,11 +47,21 @@ export class XBRLValidationService {
   private schemaParser: XBRLSchemaParser;
   private businessRules: Map<string, BusinessRule> = new Map();
   private rtfBasePath: string;
+  private valueEvaluator: ValueAssertionEvaluator | null = null;
 
   constructor(schemaParser: XBRLSchemaParser, rtfBasePath: string) {
     this.schemaParser = schemaParser;
     this.rtfBasePath = rtfBasePath;
     this.initializeBusinessRules();
+  }
+
+  /** Lazy-load the ValueAssertionEvaluator (loads value-rules.json once) */
+  private async getValueEvaluator(): Promise<ValueAssertionEvaluator> {
+    if (!this.valueEvaluator) {
+      const dataDir = path.join(__dirname, '../data');
+      this.valueEvaluator = await ValueAssertionEvaluator.load(dataDir);
+    }
+    return this.valueEvaluator;
   }
 
   /**
@@ -243,7 +254,22 @@ export class XBRLValidationService {
         }
       }
 
-      // 3. Cross-form validation (if applicable)
+      // 3. XBRL Value Assertion validation (arithmetic cross-checks)
+      const valueEvaluator = await this.getValueEvaluator();
+      const assertionViolations = valueEvaluator.evaluate(formId, formData);
+      for (const v of assertionViolations) {
+        totalRules++;
+        failedRules++;
+        errors.push({
+          code: v.assertionId,
+          message: v.message,
+          path: v.fieldKey,
+          severity: v.severity,
+        });
+      }
+      passedRules += assertionViolations.length === 0 ? 1 : 0;
+
+      // 4. Cross-form validation (if applicable)
       const crossFormErrors = await this.validateCrossFormConsistency(formId, formData, context);
       for (const error of crossFormErrors) {
         if (error.severity === 'error') {
