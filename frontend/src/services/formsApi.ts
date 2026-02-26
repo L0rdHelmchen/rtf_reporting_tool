@@ -113,7 +113,9 @@ class FormsApiService {
       reportingPeriod,
       data
     });
-    return response.data;
+    // Backend returns { success, message, data: { instance: FormInstanceData, validation: {...} } }
+    const inner = response.data?.data ?? response.data;
+    return inner?.instance ?? inner;
   }
 
   // Update form instance
@@ -128,7 +130,9 @@ class FormsApiService {
       data,
       status: isDraft ? 'draft' : 'in_review'
     });
-    return response.data;
+    // Backend returns { success, message, data: { instance: FormInstanceData, validation: {...} } }
+    const inner = response.data?.data ?? response.data;
+    return inner?.instance ?? inner;
   }
 
   // Validate form data
@@ -141,7 +145,21 @@ class FormsApiService {
       reportingPeriod,
       data
     });
-    return response.data;
+    // Backend wraps result in { success, message, data: { isValid, errors, warnings } }
+    const inner = response.data?.data ?? response.data;
+    return {
+      valid: inner?.isValid ?? inner?.valid ?? false,
+      errors: (inner?.errors ?? []).map((e: any) => ({
+        field: e.fieldPath ?? e.field ?? '',
+        message: e.messageDe ?? e.message ?? e.errorCode ?? '',
+        severity: e.severity ?? 'error'
+      })),
+      warnings: (inner?.warnings ?? []).map((w: any) => ({
+        field: w.fieldPath ?? w.field ?? '',
+        message: w.messageDe ?? w.message ?? w.errorCode ?? '',
+        severity: w.severity ?? 'warning'
+      }))
+    };
   }
 
   // Submit form for review
@@ -221,14 +239,15 @@ class FormsApiService {
     return response.data;
   }
 
-  // Export form as different formats
+  // Export form as XBRL
   async exportForm(
     formId: string,
     reportingPeriod: string,
-    format: 'pdf' | 'excel' | 'xbrl'
+    format: 'xbrl' | 'xml' = 'xbrl'
   ): Promise<Blob> {
-    const response = await api.get(
-      `/forms/${formId}/export?reportingPeriod=${reportingPeriod}&format=${format}`,
+    const response = await api.post(
+      `/forms/${formId}/instance/${reportingPeriod}/export`,
+      { format },
       { responseType: 'blob' }
     );
     return response.data;

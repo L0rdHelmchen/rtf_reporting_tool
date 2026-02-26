@@ -189,14 +189,21 @@ export class XBRLValidationService {
 
     try {
       // 1. Schema validation
-      const schemaErrors = await this.schemaParser.validateFormData(formId, formData);
-      for (const error of schemaErrors) {
-        if (error.severity === 'error') {
-          errors.push(error);
-        } else if (error.severity === 'warning') {
-          warnings.push(error);
+      const schemaResult = this.schemaParser.validateFormData(formId, formData);
+      for (const e of schemaResult.errors) {
+        const severity = (e as any).severity ?? 'error';
+        const mapped = {
+          fieldPath: (e as any).fieldPath ?? e.field,
+          errorCode: (e as any).errorCode ?? 'SCHEMA_ERROR',
+          messageDe: (e as any).messageDe ?? e.message,
+          severity
+        };
+        if (severity === 'error') {
+          errors.push(mapped as any);
+        } else if (severity === 'warning') {
+          warnings.push(mapped as any);
         } else {
-          infos.push(error);
+          infos.push(mapped as any);
         }
       }
 

@@ -126,7 +126,7 @@ const FormRenderer: React.FC<FormRendererProps> = ({
             }
             break;
           case 'mi1':
-            fieldSchema = z.number();
+            fieldSchema = z.coerce.number();
             if (field.validation?.min !== undefined) {
               fieldSchema = fieldSchema.min(field.validation.min);
             }
@@ -135,10 +135,10 @@ const FormRenderer: React.FC<FormRendererProps> = ({
             }
             break;
           case 'pi2':
-            fieldSchema = z.number().min(0).max(100);
+            fieldSchema = z.coerce.number().min(0).max(100);
             break;
           case 'ii3':
-            fieldSchema = z.number().int();
+            fieldSchema = z.coerce.number().int();
             if (field.validation?.min !== undefined) {
               fieldSchema = fieldSchema.min(field.validation.min);
             }

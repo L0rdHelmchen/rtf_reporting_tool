@@ -4,7 +4,7 @@
   "description": "RTF Reporting Tool Backend API - Deutsche Bundesbank Compliance",
   "main": "dist/server.js",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node -e \"const fs=require('fs');fs.mkdirSync('dist/data',{recursive:true});fs.cpSync('src/data','dist/data',{recursive:true})\"",
     "dev": "tsx watch --clear-screen=false src/server.ts",
     "start": "node dist/server.js",
     "test": "jest",

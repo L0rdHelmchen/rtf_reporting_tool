@@ -148,6 +148,17 @@ export interface XBRLFact {
   id?: string;
 }
 
+// Required fields entry from required-fields.json
+interface RequiredFieldEntry {
+  assertionId: string;
+  row: string;
+  col: string | null;
+  fieldKey: string;
+  label: string;
+  errorLabel: string;
+  dataType: 'si6' | 'mi1' | 'pi2' | 'ii3' | 'di5' | 'bi7' | 'ei8' | 'text';
+}
+
 export class XBRLSchemaParser {
   private concepts = new Map<string, XBRLConcept>();
   private dimensions = new Map<string, XBRLDimension>();
@@ -157,6 +168,8 @@ export class XBRLSchemaParser {
   private namespaces = new Map<string, string>();
   private roles = new Map<string, string>();
   private domainOptions = new Map<string, Array<{value: string; label: string}>>();
+  // Map: uppercase template code → required field entries (from existence assertions)
+  private requiredFields = new Map<string, RequiredFieldEntry[]>();
 
   constructor(private basePath: string) {
     this.initializeNamespaces();
@@ -182,6 +195,9 @@ export class XBRLSchemaParser {
     try {
       logger.info('Starting comprehensive RTF taxonomy parsing...');
 
+      // 0. Load required fields from existence assertions
+      await this.loadRequiredFields();
+
       // 1. Parse main taxonomy schema
       const mainSchemaPath = path.join(
         this.basePath,
@@ -202,6 +218,48 @@ export class XBRLSchemaParser {
     } catch (error) {
       logger.error(`Failed to parse RTF taxonomy: ${error}`);
       throw error;
+    }
+  }
+
+  /**
+   * Load required fields from the generated required-fields.json.
+   * Also registers the DBL form (which isn't in tab.xsd) as a synthetic form.
+   */
+  private async loadRequiredFields(): Promise<void> {
+    const dataPath = path.join(__dirname, '../data/required-fields.json');
+    try {
+      const raw = await fs.readFile(dataPath, 'utf8');
+      const data = JSON.parse(raw) as {
+        version: string;
+        requiredFields: Record<string, RequiredFieldEntry[]>;
+      };
+
+      for (const [template, fields] of Object.entries(data.requiredFields)) {
+        this.requiredFields.set(template.toUpperCase(), fields);
+      }
+
+      // Register synthetic DBL form (not in tab.xsd) so it appears in the form list
+      const dblFields = this.requiredFields.get('DBL');
+      if (dblFields && !this.forms.has('dbl')) {
+        const dblForm: FormDefinition = {
+          id: 'dbl',
+          code: 'DBL',
+          name: 'Doppelte Buchführung (DBL)',
+          namespace: '',
+          concepts: [],
+          hypercubes: [],
+          roles: [],
+          sections: [],
+          version: '2023-12',
+          taxonomyVersion: '2.2',
+        };
+        this.forms.set('dbl', dblForm);
+        logger.info('Registered synthetic DBL form from existence assertions');
+      }
+
+      logger.info(`Loaded required fields for ${this.requiredFields.size} template(s) from required-fields.json`);
+    } catch (err) {
+      logger.warn(`Could not load required-fields.json: ${err}. Required field validation will be skipped.`);
     }
   }
 
@@ -805,12 +863,63 @@ export class XBRLSchemaParser {
             order: 1
           });
         }
+
+        // Prepend required header section from existence assertions (if any)
+        const requiredSection = this.buildRequiredFieldsSection(form.code);
+        if (requiredSection) {
+          // Renumber existing sections to make room at the front
+          for (const s of form.sections) {
+            s.order += 1;
+          }
+          form.sections.unshift(requiredSection);
+        }
       }
 
       logger.info(`Built field structures for ${this.forms.size} forms`);
     } catch (error) {
       logger.error(`Failed to build form structures: ${error}`);
     }
+  }
+
+  /**
+   * Build a "Pflichtfelder" section from existence assertions for a given form code.
+   * Returns null if no required fields are defined for this form's template.
+   */
+  private buildRequiredFieldsSection(formCode: string): FormSection | null {
+    // Template code = form code stripped of trailing numbers/suffixes (e.g. STG1 → STG)
+    // We match the form code against registered template codes
+    const templateCode = formCode.toUpperCase();
+    let fields = this.requiredFields.get(templateCode);
+
+    // Also try base template: STG1 → STG, GRP11 → GRP, DBL → DBL
+    if (!fields) {
+      for (const [template, entries] of this.requiredFields) {
+        if (templateCode.startsWith(template)) {
+          fields = entries;
+          break;
+        }
+      }
+    }
+
+    if (!fields || fields.length === 0) return null;
+
+    const formFields: FormField[] = fields.map((entry) => ({
+      id: `req_${entry.fieldKey}`,
+      name: entry.fieldKey,
+      label: entry.label,
+      dataType: entry.dataType,
+      required: true,
+      conceptId: entry.assertionId,
+      helpText: entry.errorLabel,
+    }));
+
+    return {
+      id: 'required_section',
+      title: 'Pflichtangaben',
+      description: 'Diese Felder müssen ausgefüllt werden (gem. XBRL Validierungsregeln)',
+      fields: formFields,
+      order: 1,
+    };
   }
 
   private buildFieldsForSection(conceptIds: string[], sectionIndex: number, totalSections: number): FormField[] {
@@ -832,7 +941,7 @@ export class XBRLSchemaParser {
         name: concept.name,
         label: concept.labels?.['de'] || concept.name,
         dataType: concept.dataType || 'text',
-        required: false, // TODO: Determine from validation rules
+        required: false, // RTF taxonomy defines required fields via XBRL Formula Linkbase, not via nillable
         validation: concept.validation,
         conceptId: conceptId,
         helpText: this.generateHelpText(concept)
@@ -1000,6 +1109,27 @@ export class XBRLSchemaParser {
           // Validate against field validation rules
           if (field.validation && !this.validateFieldRules(field, value)) {
             errors.push({ field: field.name, message: `Wert für ${field.label} entspricht nicht den Validierungsregeln` });
+          }
+        }
+      }
+    }
+
+    // Check existence-assertion required fields (cross-check against required-fields map)
+    const templateCode = form.code.toUpperCase();
+    let reqFields = this.requiredFields.get(templateCode);
+    if (!reqFields) {
+      for (const [template, entries] of this.requiredFields) {
+        if (templateCode.startsWith(template)) { reqFields = entries; break; }
+      }
+    }
+    if (reqFields) {
+      for (const req of reqFields) {
+        const val = formData[req.fieldKey];
+        if (val === undefined || val === null || val === '') {
+          // Only add if not already reported via field.required check above
+          const alreadyReported = errors.some(e => e.field === req.fieldKey);
+          if (!alreadyReported) {
+            errors.push({ field: req.fieldKey, message: req.errorLabel });
           }
         }
       }

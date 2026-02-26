@@ -1,0 +1,92 @@
+{
+  "version": "2023-12",
+  "generatedAt": "2026-02-26T14:42:14.517Z",
+  "description": "Required fields derived from XBRL Formula Linkbase ea:existenceAssertion elements",
+  "requiredFields": {
+    "DBL": [
+      {
+        "assertionId": "de_sprv_edbl_0010",
+        "row": "x010",
+        "col": null,
+        "fieldKey": "x010",
+        "label": "Institutsname",
+        "errorLabel": "Institutsname fehlt",
+        "dataType": "si6"
+      },
+      {
+        "assertionId": "de_sprv_edbl_0020",
+        "row": "x020",
+        "col": null,
+        "fieldKey": "x020",
+        "label": "Kreditgeber-ID",
+        "errorLabel": "Kreditgeber-ID fehlt",
+        "dataType": "si6"
+      },
+      {
+        "assertionId": "de_sprv_edbl_0030",
+        "row": "x030",
+        "col": null,
+        "fieldKey": "x030",
+        "label": "Berichtsumfang",
+        "errorLabel": "Berichtsumfang fehlt",
+        "dataType": "ei8"
+      },
+      {
+        "assertionId": "de_sprv_edbl_0040",
+        "row": "x040",
+        "col": null,
+        "fieldKey": "x040",
+        "label": "Stichtag",
+        "errorLabel": "Stichtag fehlt",
+        "dataType": "di5"
+      },
+      {
+        "assertionId": "de_sprv_edbl_0045",
+        "row": "x045",
+        "col": null,
+        "fieldKey": "x045",
+        "label": "Betragsbasis",
+        "errorLabel": "Betragsbasis fehlt",
+        "dataType": "ei8"
+      },
+      {
+        "assertionId": "de_sprv_edbl_0050",
+        "row": "x050",
+        "col": null,
+        "fieldKey": "x050",
+        "label": "Ansprechpartner",
+        "errorLabel": "Ansprechpartner fehlt",
+        "dataType": "si6"
+      },
+      {
+        "assertionId": "de_sprv_edbl_0060",
+        "row": "x060",
+        "col": null,
+        "fieldKey": "x060",
+        "label": "Telefon",
+        "errorLabel": "Telefon fehlt",
+        "dataType": "si6"
+      },
+      {
+        "assertionId": "de_sprv_edbl_0070",
+        "row": "x070",
+        "col": null,
+        "fieldKey": "x070",
+        "label": "E-Mail",
+        "errorLabel": "E-Mail fehlt",
+        "dataType": "si6"
+      }
+    ],
+    "STG": [
+      {
+        "assertionId": "de_sprv_estg_0010",
+        "row": "x010",
+        "col": "x010",
+        "fieldKey": "x010_x010",
+        "label": "Frequenz der Berichterstattung",
+        "errorLabel": "Frequenz der Berichterstattung fehlt",
+        "dataType": "ei8"
+      }
+    ]
+  }
+}

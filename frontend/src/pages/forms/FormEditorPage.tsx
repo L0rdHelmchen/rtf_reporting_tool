@@ -151,7 +151,7 @@ const FormEditorPage: React.FC = () => {
   };
 
   // Handle export
-  const handleExport = async (format: 'pdf' | 'excel' | 'xbrl') => {
+  const handleExport = async (format: 'xbrl' | 'xml' = 'xbrl') => {
     if (!formId || !reportingPeriod) return;
 
     try {
@@ -285,9 +285,9 @@ const FormEditorPage: React.FC = () => {
             <Button
               variant="outlined"
               startIcon={<Download />}
-              onClick={() => handleExport('pdf')}
+              onClick={() => handleExport('xbrl')}
             >
-              Export
+              XBRL Export
             </Button>
 
             {!isReadonly && formInstance?.status === 'in_review' && (
@@ -312,28 +312,40 @@ const FormEditorPage: React.FC = () => {
 
       {/* Validation Results */}
       {showValidation && validationResult && (
-        <Alert
-          severity={validationResult.valid ? 'success' : 'error'}
-          sx={{ mb: 3 }}
-          onClose={() => setShowValidation(false)}
-        >
-          {validationResult.valid ? (
-            <Typography>✅ Das Formular ist gültig und kann eingereicht werden.</Typography>
-          ) : (
-            <Box>
-              <Typography variant="h6" gutterBottom>
+        <Box sx={{ mb: 3 }}>
+          {validationResult.errors && validationResult.errors.length > 0 ? (
+            <Alert severity="error" onClose={() => setShowValidation(false)}>
+              <Typography variant="subtitle1" gutterBottom fontWeight="bold">
                 Validierungsfehler gefunden:
               </Typography>
-              <ul>
-                {validationResult.errors?.map((error, index) => (
+              <ul style={{ margin: 0, paddingLeft: 20 }}>
+                {validationResult.errors.map((error, index) => (
                   <li key={index}>
                     <strong>{error.field}:</strong> {error.message}
                   </li>
                 ))}
               </ul>
-            </Box>
+            </Alert>
+          ) : (
+            <Alert severity="success" onClose={() => setShowValidation(false)}>
+              Keine Validierungsfehler gefunden.
+            </Alert>
           )}
-        </Alert>
+          {validationResult.warnings && validationResult.warnings.length > 0 && (
+            <Alert severity="warning" sx={{ mt: 1 }}>
+              <Typography variant="subtitle1" gutterBottom fontWeight="bold">
+                Hinweise ({validationResult.warnings.length}):
+              </Typography>
+              <ul style={{ margin: 0, paddingLeft: 20 }}>
+                {validationResult.warnings.map((w, index) => (
+                  <li key={index}>
+                    <strong>{w.field}:</strong> {w.message}
+                  </li>
+                ))}
+              </ul>
+            </Alert>
+          )}
+        </Box>
       )}
 
       {/* Form Renderer */}
