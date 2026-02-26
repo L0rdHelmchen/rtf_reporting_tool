@@ -36,6 +36,7 @@ import { Link as RouterLink, useLocation } from 'react-router-dom';
 import { useAppSelector } from '../../store';
 import { selectUser } from '../../store/slices/authSlice';
 import { FORM_CATEGORY_NAMES_DE } from '@rtf-tool/shared';
+import { formsApi } from '../../services/formsApi';
 
 interface NavigationItem {
   id: string;
@@ -53,6 +54,13 @@ const Sidebar: React.FC = () => {
   const user = useAppSelector(selectUser);
 
   const [expandedItems, setExpandedItems] = React.useState<string[]>(['forms']);
+  const [categoryCounts, setCategoryCounts] = React.useState<Record<string, number>>({});
+
+  React.useEffect(() => {
+    formsApi.getFormCounts()
+      .then(counts => setCategoryCounts(counts))
+      .catch(() => {}); // fail silently – badges bleiben leer
+  }, []);
 
   const handleExpand = (itemId: string) => {
     setExpandedItems(prev =>
@@ -105,42 +113,42 @@ const Sidebar: React.FC = () => {
           label: FORM_CATEGORY_NAMES_DE.GRP,
           path: '/forms?category=GRP',
           icon: <Business />,
-          badge: 8
+          badge: categoryCounts['GRP']
         },
         {
           id: 'forms-rsk',
           label: FORM_CATEGORY_NAMES_DE.RSK,
           path: '/forms?category=RSK',
           icon: <Security />,
-          badge: 12
+          badge: categoryCounts['RSK']
         },
         {
           id: 'forms-rdp',
           label: FORM_CATEGORY_NAMES_DE.RDP,
           path: '/forms?category=RDP',
           icon: <AccountBalance />,
-          badge: 4
+          badge: categoryCounts['RDP']
         },
         {
           id: 'forms-ilaap',
           label: FORM_CATEGORY_NAMES_DE.ILAAP,
           path: '/forms?category=ILAAP',
           icon: <TrendingUp />,
-          badge: '50+'
+          badge: categoryCounts['ILAAP']
         },
         {
           id: 'forms-kpl',
           label: FORM_CATEGORY_NAMES_DE.KPL,
           path: '/forms?category=KPL',
           icon: <Assessment />,
-          badge: 8
+          badge: categoryCounts['KPL']
         },
         {
           id: 'forms-other',
           label: 'Sonstige',
           path: '/forms?category=OTHER',
           icon: <FolderSpecial />,
-          badge: 6
+          badge: categoryCounts['OTHER']
         }
       ]
     },

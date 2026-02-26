@@ -173,14 +173,11 @@ class FormsApiService {
     return response.data;
   }
 
-  // Get form categories
-  async getFormCategories(): Promise<Array<{
-    code: string;
-    name: string;
-    count: number;
-  }>> {
-    const response = await api.get('/forms/categories');
-    return response.data;
+  // Get form category counts (unfiltered)
+  async getFormCounts(): Promise<Record<string, number>> {
+    const response = await api.get('/forms');
+    const inner = response.data?.data ?? response.data;
+    return inner?.categories ?? {};
   }
 
   // Get reporting periods
