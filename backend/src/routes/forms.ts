@@ -12,7 +12,7 @@ import { XBRLValidationService, ValidationContext } from '../services/XBRLValida
 import { FormStatus } from '@rtf-tool/shared';
 
 // Initialize XBRL services
-const RTF_BASE_PATH = path.join(__dirname, '../../../../RTF_Validierungsdateien');
+const RTF_BASE_PATH = path.join(__dirname, '../../..');
 const schemaParser = new XBRLSchemaParser(RTF_BASE_PATH);
 const generatorService = new XBRLGeneratorService(schemaParser, RTF_BASE_PATH);
 const validationService = new XBRLValidationService(schemaParser, RTF_BASE_PATH);
@@ -26,9 +26,11 @@ export default async function formRoutes(
 ) {
   // Ensure XBRL services are initialized
   fastify.addHook('onReady', async () => {
-    if (!schemaParser) {
+    try {
       console.log('Initializing XBRL Schema Parser for forms...');
       await schemaParser.parseRTFTaxonomy();
+    } catch (error) {
+      console.warn('XBRL taxonomy not available, forms API will return empty results:', error);
     }
   });
 
@@ -37,20 +39,20 @@ export default async function formRoutes(
    */
   fastify.get('/', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      const forms = await schemaParser.getAvailableForms();
+      const forms = [...schemaParser.getForms().values()];
 
       const formsWithMetadata = await Promise.all(
-        forms.map(async (form) => {
-          const statistics = await generatorService.getFormStatistics(form.formId);
-          const validationSummary = await validationService.getValidationSummary(form.formId);
+        forms.map(async (form: import('../services/XBRLSchemaParser').FormDefinition) => {
+          const statistics = await generatorService.getFormStatistics(form.id);
+          const validationSummary = await validationService.getValidationSummary(form.id);
 
           return {
-            formId: form.formId,
-            code: form.formId,
+            formId: form.id,
+            code: form.code,
             name: form.name,
             version: form.version,
             namespace: form.namespace,
-            description: `RTF Form ${form.formId} - ${form.name}`,
+            description: `RTF Form ${form.code} - ${form.name}`,
             sections: form.sections?.length || 0,
             totalFields: statistics.totalFields,
             requiredFields: statistics.requiredFields,
@@ -62,7 +64,7 @@ export default async function formRoutes(
               warnings: validationSummary.warningRules,
               categories: validationSummary.categories
             },
-            category: this.getFormCategory(form.formId),
+            category: getFormCategory(form.code),
             lastModified: '2023-12-31T00:00:00Z',
             isActive: true
           };
@@ -75,7 +77,7 @@ export default async function formRoutes(
         data: {
           forms: formsWithMetadata,
           totalCount: formsWithMetadata.length,
-          categories: this.getFormCategories(formsWithMetadata)
+          categories: getFormCategories(formsWithMetadata)
         }
       });
 
@@ -128,9 +130,9 @@ export default async function formRoutes(
           validationSummary,
           instances,
           metadata: {
-            category: this.getFormCategory(formId),
-            complexity: this.getFormComplexity(statistics),
-            estimatedTime: this.getEstimatedCompletionTime(statistics)
+            category: getFormCategory(formId),
+            complexity: getFormComplexity(statistics),
+            estimatedTime: getEstimatedCompletionTime(statistics)
           }
         }
       });
@@ -450,9 +452,4 @@ export default async function formRoutes(
     return `${hours} hour${hours > 1 ? 's' : ''}${minutes > 0 ? ` ${minutes} minutes` : ''}`;
   };
 
-  // Attach helper methods to the instance for access
-  (this as any).getFormCategory = getFormCategory;
-  (this as any).getFormCategories = getFormCategories;
-  (this as any).getFormComplexity = getFormComplexity;
-  (this as any).getEstimatedCompletionTime = getEstimatedCompletionTime;
 }

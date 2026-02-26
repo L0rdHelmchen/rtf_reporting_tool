@@ -115,15 +115,16 @@ const App: React.FC = () => {
     return () => window.removeEventListener('resize', handleResize);
   }, [dispatch, i18n]);
 
-  // Get current user if authenticated but user data missing
+  // Verify session on mount when authenticated (only when isAuthenticated changes)
   useEffect(() => {
-    if (isAuthenticated && !authLoading) {
+    if (isAuthenticated) {
       const token = localStorage.getItem('rtf_access_token');
       if (token) {
         dispatch(getCurrentUser());
       }
     }
-  }, [isAuthenticated, authLoading, dispatch]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated]);
 
   // Show loading screen during initial authentication check
   if (authLoading) {

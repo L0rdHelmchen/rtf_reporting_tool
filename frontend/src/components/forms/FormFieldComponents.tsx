@@ -15,9 +15,6 @@ import {
   Chip
 } from '@mui/material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
-import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
-import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
-import { de } from 'date-fns/locale';
 import { Controller, Control } from 'react-hook-form';
 
 // Base field props
@@ -201,28 +198,26 @@ export const DateFieldDI5: React.FC<BaseFieldProps> = ({
   helperText,
   error = false
 }) => (
-  <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={de}>
-    <Controller
-      name={name}
-      control={control}
-      rules={{ required: required ? 'Dieses Feld ist erforderlich' : false }}
-      render={({ field, fieldState }) => (
-        <DatePicker
-          {...field}
-          label={label}
-          disabled={disabled}
-          slotProps={{
-            textField: {
-              fullWidth: true,
-              error: error || !!fieldState.error,
-              helperText: fieldState.error?.message || helperText,
-              sx: { mb: 2 }
-            }
-          }}
-        />
-      )}
-    />
-  </LocalizationProvider>
+  <Controller
+    name={name}
+    control={control}
+    rules={{ required: required ? 'Dieses Feld ist erforderlich' : false }}
+    render={({ field, fieldState }) => (
+      <DatePicker
+        {...field}
+        label={label}
+        disabled={disabled}
+        slotProps={{
+          textField: {
+            fullWidth: true,
+            error: error || !!fieldState.error,
+            helperText: fieldState.error?.message || helperText,
+            sx: { mb: 2 }
+          }
+        }}
+      />
+    )}
+  />
 );
 
 // BI7 - Boolean field (Checkbox)

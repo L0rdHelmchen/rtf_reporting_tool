@@ -65,13 +65,29 @@ class FormsApiService {
     if (params?.limit) searchParams.append('limit', params.limit.toString());
 
     const response = await api.get(`/forms?${searchParams.toString()}`);
-    return response.data;
+    const inner = response.data?.data ?? response.data;
+    const rawForms: any[] = inner?.forms ?? [];
+    // Backend returns `formId` but FormListItem expects `id`
+    const forms: FormListItem[] = rawForms.map((f) => ({
+      ...f,
+      id: f.id ?? f.formId,
+      status: f.status ?? 'draft'
+    }));
+    const total = inner?.totalCount ?? inner?.total ?? 0;
+    const limit = params?.limit ?? 12;
+    return {
+      forms,
+      total,
+      page: params?.page ?? 1,
+      totalPages: Math.ceil(total / limit) || 1
+    };
   }
 
   // Get specific form definition
   async getFormDefinition(formId: string): Promise<FormDefinition> {
-    const response = await api.get(`/forms/${formId}/definition`);
-    return response.data;
+    const response = await api.get(`/forms/${formId}`);
+    const inner = response.data?.data ?? response.data;
+    return inner?.formDefinition ?? inner;
   }
 
   // Get form instance (user's saved data)

@@ -12,7 +12,7 @@ import { XBRLGeneratorService, XBRLInstanceOptions } from '../services/XBRLGener
 import { XBRLValidationService, ValidationContext } from '../services/XBRLValidationService';
 
 // Initialize services
-const RTF_BASE_PATH = path.join(__dirname, '../../../../RTF_Validierungsdateien');
+const RTF_BASE_PATH = path.join(__dirname, '../../..');
 const schemaParser = new XBRLSchemaParser(RTF_BASE_PATH);
 const generatorService = new XBRLGeneratorService(schemaParser, RTF_BASE_PATH);
 const validationService = new XBRLValidationService(schemaParser, RTF_BASE_PATH);
@@ -88,8 +88,7 @@ export default async function xbrlRoutes(
       await schemaParser.parseRTFTaxonomy();
       console.log('XBRL Schema Parser initialized successfully');
     } catch (error) {
-      console.error('Failed to initialize XBRL Schema Parser:', error);
-      throw error;
+      console.warn('XBRL taxonomy not available, XBRL API will return empty results:', error);
     }
   });
 

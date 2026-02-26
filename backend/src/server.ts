@@ -19,6 +19,7 @@ import xbrlRoutes from './routes/xbrl';
 import institutionRoutes from './routes/institutions';
 import userRoutes from './routes/users';
 import healthRoutes from './routes/health';
+import reportingPeriodsRoutes from './routes/reportingPeriods';
 
 // Create Fastify instance
 const server = Fastify({
@@ -174,7 +175,7 @@ async function buildServer() {
 
     // Response time middleware
     server.addHook('onResponse', async (request, reply) => {
-      const responseTime = reply.getResponseTime();
+      const responseTime = reply.elapsedTime;
       logger.debug('Request completed', {
         method: request.method,
         url: request.url,
@@ -190,6 +191,7 @@ async function buildServer() {
     await server.register(xbrlRoutes, { prefix: '/api/v1/xbrl' });
     await server.register(institutionRoutes, { prefix: '/api/v1/institutions' });
     await server.register(userRoutes, { prefix: '/api/v1/users' });
+    await server.register(reportingPeriodsRoutes, { prefix: '/api/v1/reporting-periods' });
 
     // Root endpoint
     server.get('/', async () => {

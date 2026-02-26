@@ -1,5 +1,5 @@
 // RTF Reporting Tool - Redux Store Configuration
-import { configureStore } from '@reduxjs/toolkit';
+import { configureStore, combineReducers } from '@reduxjs/toolkit';
 import { persistStore, persistReducer } from 'redux-persist';
 import storage from 'redux-persist/lib/storage';
 
@@ -8,32 +8,27 @@ import authReducer from './slices/authSlice';
 import formsReducer from './slices/formsSlice';
 import uiReducer from './slices/uiSlice';
 
-// Persist configuration
+// Root persist configuration
 const persistConfig = {
   key: 'rtf-tool',
   version: 1,
   storage,
-  whitelist: ['auth'], // Only persist auth state
-  blacklist: ['ui'] // Don't persist UI state
+  whitelist: ['auth'] // Only persist auth state
 };
 
-// Auth persist configuration
-const authPersistConfig = {
-  key: 'auth',
-  storage,
-  whitelist: ['user', 'institution', 'isAuthenticated'] // Don't persist tokens for security
-};
+// Combine reducers
+const rootReducer = combineReducers({
+  auth: authReducer,
+  forms: formsReducer,
+  ui: uiReducer
+});
 
-// Create persisted reducers
-const persistedAuthReducer = persistReducer(authPersistConfig, authReducer);
+// Wrap root reducer with persistReducer so PersistGate works
+const persistedReducer = persistReducer(persistConfig, rootReducer);
 
 // Configure store
 export const store = configureStore({
-  reducer: {
-    auth: persistedAuthReducer,
-    forms: formsReducer,
-    ui: uiReducer
-  },
+  reducer: persistedReducer,
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({
       serializableCheck: {
@@ -55,7 +50,7 @@ export const store = configureStore({
 export const persistor = persistStore(store);
 
 // Export types
-export type RootState = ReturnType<typeof store.getState>;
+export type RootState = ReturnType<typeof rootReducer>;
 export type AppDispatch = typeof store.dispatch;
 
 // Typed hooks

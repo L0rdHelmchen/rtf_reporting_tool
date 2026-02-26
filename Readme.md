@@ -1,8 +1,10 @@
-🚀 RTF Reporting Tool starten                                                                                                                                                                                                                                              
-                                                            
-  Du hast mehrere Optionen, um die RTF Reporting Tool App zu starten. Hier sind alle Methoden:                                                                                                                                                                                                                                                                                                                                                                                                                                                  
+🚀 RTF Reporting Tool starten                                                                                                                                                                                                                                                                      
+  Du hast mehrere Optionen, um die RTF Reporting Tool App zu starten. Hier sind alle Methoden:                                                                                                            
   📋 Voraussetzungen
-                                                                                                                                                                                                                                                                             
+
+brew install node
+
+
   Node.js & npm:                                            
   node --version  # >= 18.0.0 erforderlich
   npm --version   # >= 9.0.0 erforderlich

@@ -32,6 +32,12 @@ services:
       retries: 3
 
   backend:
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3001/health/ping || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
     build:
       context: .
       dockerfile: backend/Dockerfile.dev
@@ -44,10 +50,12 @@ services:
       REDIS_URL: redis://redis:6379
       JWT_SECRET: rtf-jwt-secret-development-key-32chars-min
       API_PORT: 3001
+      RATE_LIMIT_MAX_REQUESTS: 1000
     volumes:
       - ./backend:/app/backend    # Source live gemountet
       - ./shared:/app/shared      # Shared live gemountet
       - backend_node_modules:/app/node_modules   # node_modules aus Image
+      - ./RTF_Validierungsdateien:/app/RTF_Validierungsdateien:ro  # Bundesbank XBRL files
     working_dir: /app/backend
     depends_on:
       postgres:

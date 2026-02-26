@@ -4,5 +4,12 @@ shared/dist/
 **/dist/
 .env
 .env.*
-*.log.DS_Store
+*.log
+.DS_Store
 **/.DS_Store
+
+# XBRL validation files (large, not part of source code)
+RTF_Validierungsdateien/
+
+# Claude Code project memory
+.claude/

@@ -31,6 +31,7 @@ export interface XBRLConcept {
   labels?: Record<string, string>; // Language -> Label mapping
   namespace: string;
   dataType?: 'si6' | 'mi1' | 'pi2' | 'ii3' | 'di5' | 'bi7' | 'ei8' | 'text';
+  enumDomainCode?: string; // Domain code for QNameItemType fields (e.g. 'IC', 'WZ')
   validation?: {
     minLength?: number;
     maxLength?: number;
@@ -155,6 +156,7 @@ export class XBRLSchemaParser {
   private labels = new Map<string, Record<string, string>>();
   private namespaces = new Map<string, string>();
   private roles = new Map<string, string>();
+  private domainOptions = new Map<string, Array<{value: string; label: string}>>();
 
   constructor(private basePath: string) {
     this.initializeNamespaces();
@@ -169,6 +171,11 @@ export class XBRLSchemaParser {
     this.namespaces.set('label', 'http://xbrl.org/2008/label');
     this.namespaces.set('xbrldt', 'http://xbrl.org/2005/xbrldt');
     this.namespaces.set('model', 'http://www.eurofiling.info/xbrl/ext/model');
+  }
+
+  // libxmljs expects a plain object for namespace map, not a Map
+  private get ns(): Record<string, string> {
+    return Object.fromEntries(this.namespaces);
   }
 
   async parseRTFTaxonomy(): Promise<void> {
@@ -261,7 +268,7 @@ export class XBRLSchemaParser {
       const schema = doc.root()!;
 
       // Parse dimension elements using XPath
-      const elements = schema.find('//xs:element[@substitutionGroup]', this.namespaces) as libxmljs.Element[];
+      const elements = schema.find('//xs:element[@substitutionGroup]', this.ns) as libxmljs.Element[];
 
       for (const element of elements) {
         const name = element.attr('name')?.value();
@@ -297,7 +304,7 @@ export class XBRLSchemaParser {
       const doc = libxmljs.parseXml(schemaContent);
       const schema = doc.root()!;
 
-      const elements = schema.find('//xs:element', this.namespaces) as libxmljs.Element[];
+      const elements = schema.find('//xs:element', this.ns) as libxmljs.Element[];
       const members: XBRLDimensionMember[] = [];
 
       for (const element of elements) {
@@ -349,6 +356,7 @@ export class XBRLSchemaParser {
       );
 
       const formDirs = await fs.readdir(formsPath);
+      let foundAny = false;
 
       // Process each form directory
       for (const formDir of formDirs) {
@@ -359,13 +367,208 @@ export class XBRLSchemaParser {
           const schemaPath = path.join(formDirPath, `${formDir}.xsd`);
           if (await this.fileExists(schemaPath)) {
             await this.parseFormSchema(schemaPath);
+            foundAny = true;
           }
         }
+      }
+
+      // Fallback: if no individual form XSD files found, extract forms from tab.xsd + tab-lab-de.xml
+      if (!foundAny) {
+        logger.info('No individual form XSD files found, falling back to tab.xsd extraction...');
+        await this.parseFormsFromTabXsd(formsPath);
       }
 
       logger.info(`Parsed ${this.forms.size} form schemas`);
     } catch (error) {
       logger.error(`Failed to parse form schemas: ${error}`);
+    }
+  }
+
+  /**
+   * Parse all metric concept definitions from dict/met/met.xsd.
+   * Loads German labels into this.labels, adds XBRLConcepts to this.concepts.
+   * Returns the list of concept IDs so they can be assigned to forms.
+   */
+  private async parseMetricsDictionary(tabPath: string): Promise<string[]> {
+    const metPath = path.join(tabPath, '../../../../../dict/met');
+    const metXsdPath = path.join(metPath, 'met.xsd');
+    const metLabPath = path.join(metPath, 'met-lab-de.xml');
+    const conceptIds: string[] = [];
+
+    if (!(await this.fileExists(metXsdPath))) return conceptIds;
+
+    // Load German labels first so parseElement can pick them up
+    const labelMap = await this.parseGenericLabelLinkbase(metLabPath);
+    for (const [key, value] of labelMap) {
+      this.labels.set(key, value);
+    }
+
+    const metContent = await fs.readFile(metXsdPath, 'utf8');
+    const metDoc = libxmljs.parseXml(metContent);
+    const targetNs = metDoc.root()?.attr('targetNamespace')?.value() || '';
+    const elements = metDoc.find('//xs:element[@id]', this.ns) as libxmljs.Element[];
+
+    const uniqueDomainCodes = new Set<string>();
+
+    for (const el of elements) {
+      const concept = this.parseElement(el, targetNs);
+      if (concept && !concept.abstract) {
+        // For QNameItemType (enum) fields, extract model:domain to determine valid options
+        if (concept.dataType === 'ei8') {
+          const rawXml = el.toString();
+          const domainMatch = rawXml.match(/model:domain="[^:]+:([^"]+)"/);
+          if (domainMatch) {
+            concept.enumDomainCode = domainMatch[1]; // e.g. 'IC', 'WZ', 'VE'
+            uniqueDomainCodes.add(domainMatch[1]);
+          }
+        }
+        this.concepts.set(concept.id, concept);
+        conceptIds.push(concept.id);
+      }
+    }
+
+    // Pre-load domain member options for all discovered domain codes
+    const domPath = path.join(tabPath, '../../../../../dict/dom');
+    for (const domainCode of uniqueDomainCodes) {
+      await this.parseDomainMemberOptions(domainCode, domPath);
+    }
+
+    logger.info(`Parsed ${conceptIds.length} metric concepts from met.xsd (${uniqueDomainCodes.size} enum domains)`);
+    return conceptIds;
+  }
+
+  /**
+   * Parse domain member values from dict/dom/{code}/mem.xsd + mem-lab-de.xml.
+   * Results are cached in this.domainOptions by domain code.
+   */
+  private async parseDomainMemberOptions(
+    domainCode: string,
+    domPath: string
+  ): Promise<Array<{value: string; label: string}>> {
+    if (this.domainOptions.has(domainCode)) {
+      return this.domainOptions.get(domainCode)!;
+    }
+
+    const domainDir = path.join(domPath, domainCode.toLowerCase());
+    const memXsdPath = path.join(domainDir, 'mem.xsd');
+    const memLabPath = path.join(domainDir, 'mem-lab-de.xml');
+
+    if (!(await this.fileExists(memXsdPath))) {
+      this.domainOptions.set(domainCode, []);
+      return [];
+    }
+
+    // Parse German labels for this domain's members
+    const labelMap = await this.parseGenericLabelLinkbase(memLabPath);
+
+    // Parse member elements from mem.xsd
+    const memContent = await fs.readFile(memXsdPath, 'utf8');
+    const memDoc = libxmljs.parseXml(memContent);
+    const elements = memDoc.find('//xs:element[@name][@id]', this.ns) as libxmljs.Element[];
+
+    const options: Array<{value: string; label: string}> = [];
+    for (const el of elements) {
+      const name = el.attr('name')?.value();
+      const id = el.attr('id')?.value();
+      if (!name || !id) continue;
+
+      const labelRecord = labelMap.get(id);
+      const labelText = labelRecord?.['de'];
+
+      // Format: "CODE – German label" or just "CODE" if no label
+      const displayLabel = labelText ? `${name} – ${labelText}` : name;
+      options.push({ value: name, label: displayLabel });
+    }
+
+    this.domainOptions.set(domainCode, options);
+    logger.info(`Parsed ${options.length} options for domain ${domainCode}`);
+    return options;
+  }
+
+  private async parseFormsFromTabXsd(tabPath: string): Promise<void> {
+    try {
+      const tabXsdPath = path.join(tabPath, 'tab.xsd');
+      const tabLabPath = path.join(tabPath, 'tab-lab-de.xml');
+
+      if (!(await this.fileExists(tabXsdPath))) return;
+
+      // Load all metric concepts from dict/met/ so form fields can be populated
+      const metricConceptIds = await this.parseMetricsDictionary(tabPath);
+
+      // Parse German labels first
+      const labelMap = new Map<string, string>();
+      if (await this.fileExists(tabLabPath)) {
+        const labContent = await fs.readFile(tabLabPath, 'utf8');
+        const labDoc = libxmljs.parseXml(labContent);
+        const nsLab: Record<string, string> = {
+          link: 'http://www.xbrl.org/2003/linkbase',
+          xlink: 'http://www.w3.org/1999/xlink'
+        };
+        const labels = labDoc.find('//link:label', nsLab) as libxmljs.Element[];
+        const locs = labDoc.find('//link:loc', nsLab) as libxmljs.Element[];
+        // Build href→label map via arcs
+        const locMap = new Map<string, string>(); // xlink:label → id
+        for (const loc of locs) {
+          const href = loc.attr('href')?.value() || '';
+          const lbl = loc.attr('label')?.value() || '';
+          const id = href.split('#')[1] || '';
+          if (id) locMap.set(lbl, id);
+        }
+        const arcs = labDoc.find('//link:labelArc', nsLab) as libxmljs.Element[];
+        const arcMap = new Map<string, string>(); // loc-label → label-label
+        for (const arc of arcs) {
+          arcMap.set(arc.attr('from')?.value() || '', arc.attr('to')?.value() || '');
+        }
+        const labelTexts = new Map<string, string>(); // xlink:label → text
+        for (const label of labels) {
+          const lbl = label.attr('label')?.value() || '';
+          labelTexts.set(lbl, label.text());
+        }
+        for (const [locLabel, id] of locMap) {
+          const labelLabel = arcMap.get(locLabel);
+          if (labelLabel) {
+            const text = labelTexts.get(labelLabel);
+            if (text) labelMap.set(id, text);
+          }
+        }
+      }
+
+      // Parse tab.xsd for tableGroupType elements
+      const tabContent = await fs.readFile(tabXsdPath, 'utf8');
+      const tabSchema = libxmljs.parseXml(tabContent);
+      const elements = tabSchema.find('//xs:element[@substitutionGroup]', this.ns) as libxmljs.Element[];
+
+      const targetNs = this.namespaces.get('target') || '';
+
+      for (const el of elements) {
+        const name = el.attr('name')?.value() || '';
+        const id = el.attr('id')?.value() || name;
+        if (!name.startsWith('tg')) continue;
+
+        const code = name.slice(2).toUpperCase(); // strip 'tg' prefix, e.g. tgGRP31 → GRP31
+        const label = labelMap.get(id) || `${code} - RTF Formular`;
+
+        const formId = id.toLowerCase();
+        const formDef: FormDefinition = {
+          id: formId,
+          code,
+          name: label,
+          namespace: targetNs,
+          concepts: [...metricConceptIds], // All shared metrics available for data entry
+          hypercubes: [],
+          roles: [],
+          sections: [],
+          version: '2023-12',
+          entryPoint: tabXsdPath,
+          taxonomyVersion: '2.2'
+        };
+
+        this.forms.set(formId, formDef);
+      }
+
+      logger.info(`Extracted ${this.forms.size} forms from tab.xsd fallback`);
+    } catch (error) {
+      logger.error(`Failed to parse forms from tab.xsd: ${error}`);
     }
   }
 
@@ -397,7 +600,7 @@ export class XBRLSchemaParser {
       };
 
       // Parse linkbase references
-      const linkbaseRefs = schema.find('//link:linkbaseRef', this.namespaces) as libxmljs.Element[];
+      const linkbaseRefs = schema.find('//link:linkbaseRef', this.ns) as libxmljs.Element[];
 
       // Parse German labels first
       for (const linkbaseRef of linkbaseRefs) {
@@ -414,7 +617,7 @@ export class XBRLSchemaParser {
       }
 
       // Parse role types
-      const roleTypes = schema.find('//link:roleType', this.namespaces) as libxmljs.Element[];
+      const roleTypes = schema.find('//link:roleType', this.ns) as libxmljs.Element[];
       for (const roleType of roleTypes) {
         const roleURI = roleType.attr('roleURI')?.value();
         if (roleURI) {
@@ -424,7 +627,7 @@ export class XBRLSchemaParser {
       }
 
       // Parse elements (concepts)
-      const elements = schema.find('//xs:element[@name]', this.namespaces) as libxmljs.Element[];
+      const elements = schema.find('//xs:element[@name]', this.ns) as libxmljs.Element[];
       for (const element of elements) {
         const concept = this.parseElement(element, targetNamespace || '');
         if (concept) {
@@ -464,12 +667,12 @@ export class XBRLSchemaParser {
       const doc = libxmljs.parseXml(linkbaseContent);
       const linkbase = doc.root()!;
 
-      const links = linkbase.find('//gen:link | //link:labelLink', this.namespaces) as libxmljs.Element[];
+      const links = linkbase.find('//gen:link | //link:labelLink', this.ns) as libxmljs.Element[];
 
       for (const link of links) {
-        const locs = link.find('.//link:loc', this.namespaces) as libxmljs.Element[];
-        const labels = link.find('.//label:label | .//link:label', this.namespaces) as libxmljs.Element[];
-        const arcs = link.find('.//gen:arc | .//link:labelArc', this.namespaces) as libxmljs.Element[];
+        const locs = link.find('.//link:loc', this.ns) as libxmljs.Element[];
+        const labels = link.find('.//label:label | .//link:label', this.ns) as libxmljs.Element[];
+        const arcs = link.find('.//gen:arc | .//link:labelArc', this.ns) as libxmljs.Element[];
 
         // Create mapping from locator labels to element IDs
         const locMap = new Map<string, string>();
@@ -558,7 +761,7 @@ export class XBRLSchemaParser {
     if (xbrlType.includes('integer') || xbrlType.includes('int')) return 'ii3';
     if (xbrlType.includes('date')) return 'di5';
     if (xbrlType.includes('boolean')) return 'bi7';
-    if (xbrlType.includes('enum')) return 'ei8';
+    if (xbrlType.includes('QName') || xbrlType.includes('enum')) return 'ei8';
     return 'text';
   }
 
@@ -654,11 +857,12 @@ export class XBRLSchemaParser {
   }
 
   private getEnumOptionsForConcept(conceptId: string): Array<{value: string; label: string; description?: string}> {
-    // TODO: Extract enum options from dimensions/domains
-    return [
-      { value: 'option1', label: 'Option 1' },
-      { value: 'option2', label: 'Option 2' }
-    ];
+    const concept = this.concepts.get(conceptId);
+    if (concept?.enumDomainCode) {
+      const options = this.domainOptions.get(concept.enumDomainCode);
+      if (options && options.length > 0) return options;
+    }
+    return [];
   }
 
   private extractFormCodeFromPath(schemaPath: string): string | null {
