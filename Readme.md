@@ -1,4 +1,4 @@
-🚀 RTF Reporting Tool starten                                                                                                                                                                                                                                                                      
+🚀 RTF Reporting Tool starten                                                                                                                                                                                        
   Du hast mehrere Optionen, um die RTF Reporting Tool App zu starten. Hier sind alle Methoden:                                                                                                            
   📋 Voraussetzungen
 
@@ -35,7 +35,7 @@ brew install node
 
   Für aktive Entwicklung - mit Hot Reload:
 
-  cd /Users/hoessm/Documents/00_Active/experiments/RTF_XBRL/rtf-reporting-tool
+  cd ..../rtf-reporting-tool
 
   # Dependencies installieren
   npm install
@@ -53,13 +53,13 @@ brew install node
 
   Terminal 1 - Backend:
 
-  cd /Users/hoessm/Documents/00_Active/experiments/RTF_XBRL/rtf-reporting-tool/backend
+  cd ..../rtf-reporting-tool/backend
   npm install
   npm run dev
 
   Terminal 2 - Frontend:
 
-  cd /Users/hoessm/Documents/00_Active/experiments/RTF_XBRL/rtf-reporting-tool/frontend
+  cd ...../rtf-reporting-tool/frontend
   npm install
   npm run dev
 
@@ -82,7 +82,7 @@ brew install node
 
   Für Entwicklung:
   # 1. Projekt-Root
-  cd /Users/hoessm/Documents/00_Active/experiments/RTF_XBRL/rtf-reporting-tool
+  cd ..../rtf-reporting-tool
 
   # 2. Docker starten (einfachste Option)
   npm run docker:up
