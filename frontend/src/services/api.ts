@@ -43,27 +43,30 @@ api.interceptors.response.use(
   async (error: AxiosError) => {
     const originalRequest = error.config as any;
 
-    // Handle 401 errors (token expired)
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    // Handle 401 errors (token expired) — skip if this IS the refresh request
+    if (error.response?.status === 401 && !originalRequest._retry && !originalRequest._isRefreshRequest) {
       originalRequest._retry = true;
 
-      try {
-        const refreshToken = localStorage.getItem('rtf_refresh_token');
-        if (refreshToken) {
-          const response = await api.post('/auth/refresh', { refreshToken });
+      const refreshToken = localStorage.getItem('rtf_refresh_token');
+      if (refreshToken) {
+        try {
+          const response = await api.post('/auth/refresh', { refreshToken }, { _isRefreshRequest: true } as any);
           const { accessToken } = response.data;
 
           localStorage.setItem('rtf_access_token', accessToken);
           originalRequest.headers.Authorization = `Bearer ${accessToken}`;
 
           return api(originalRequest);
+        } catch (refreshError) {
+          // Refresh failed — fall through to redirect below
         }
-      } catch (refreshError) {
-        // Refresh failed, redirect to login
-        localStorage.removeItem('rtf_access_token');
-        localStorage.removeItem('rtf_refresh_token');
-        window.location.href = '/login';
       }
+
+      // No refresh token, or refresh failed: clear session and redirect to login
+      localStorage.removeItem('rtf_access_token');
+      localStorage.removeItem('rtf_refresh_token');
+      window.location.href = '/login';
+      return new Promise(() => {});
     }
 
     return Promise.reject(error);

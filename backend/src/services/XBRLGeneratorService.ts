@@ -5,7 +5,7 @@
  * following Deutsche Bundesbank RTF taxonomy standards.
  */
 
-import { libxmljs } from 'libxmljs2';
+import libxmljs from 'libxmljs2';
 import { XBRLSchemaParser, FormDefinition, XBRLContext, XBRLFact } from './XBRLSchemaParser';
 import { FormStatus } from '@rtf-tool/shared';
 import { DateTime } from 'luxon';
@@ -73,17 +73,13 @@ export class XBRLGeneratorService {
         };
       }
 
-      // Validate form data
-      const validationErrors = await this.schemaParser.validateFormData(formId, formData);
-      if (validationErrors.length > 0) {
-        const errors = validationErrors.filter(e => e.severity === 'error');
-        if (errors.length > 0) {
-          return {
-            success: false,
-            errors: validationErrors
-          };
-        }
-      }
+      // Validate form data — collect warnings but don't block export
+      const validationResult = this.schemaParser.validateFormData(formId, formData);
+      const validationWarnings: ValidationError[] = validationResult.errors.map(e => ({
+        code: 'VALIDATION_WARNING' as const,
+        message: `${e.field}: ${e.message}`,
+        severity: 'warning' as const
+      }));
 
       // Generate XBRL contexts
       const contexts = await this.generateXBRLContexts(formDefinition, formData, options);
@@ -106,7 +102,7 @@ export class XBRLGeneratorService {
         success: true,
         xbrlDocument,
         fileName,
-        warnings: validationErrors.filter(e => e.severity === 'warning')
+        warnings: validationWarnings
       };
 
     } catch (error) {

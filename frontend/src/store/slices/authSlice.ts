@@ -104,6 +104,15 @@ const authSlice = createSlice({
     clearTokens: (state) => {
       state.accessToken = null;
       state.refreshToken = null;
+    },
+    clearAuth: (state) => {
+      state.isAuthenticated = false;
+      state.user = null;
+      state.institution = null;
+      state.accessToken = null;
+      state.refreshToken = null;
+      state.error = null;
+      state.isLoading = false;
     }
   },
   extraReducers: (builder) => {
@@ -182,7 +191,7 @@ const authSlice = createSlice({
 });
 
 // Export actions
-export const { clearError, updateLastActivity, setTokens, clearTokens } = authSlice.actions;
+export const { clearError, updateLastActivity, setTokens, clearTokens, clearAuth } = authSlice.actions;
 
 // Selectors
 export const selectAuth = (state: { auth: AuthState }) => state.auth;

@@ -29,7 +29,8 @@
         "fieldKey": "x030",
         "label": "Berichtsumfang",
         "errorLabel": "Berichtsumfang fehlt",
-        "dataType": "ei8"
+        "dataType": "ei8",
+        "domainCode": "BU"
       },
       {
         "assertionId": "de_sprv_edbl_0040",
@@ -47,7 +48,8 @@
         "fieldKey": "x045",
         "label": "Betragsbasis",
         "errorLabel": "Betragsbasis fehlt",
-        "dataType": "ei8"
+        "dataType": "ei8",
+        "domainCode": "BB"
       },
       {
         "assertionId": "de_sprv_edbl_0050",
@@ -85,7 +87,8 @@
         "fieldKey": "x010_x010",
         "label": "Frequenz der Berichterstattung",
         "errorLabel": "Frequenz der Berichterstattung fehlt",
-        "dataType": "ei8"
+        "dataType": "ei8",
+        "domainCode": "BI"
       }
     ]
   }

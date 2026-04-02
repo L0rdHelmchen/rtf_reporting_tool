@@ -7,7 +7,8 @@ import {
   selectIsAuthenticated,
   selectAuthLoading,
   selectAuthError,
-  getCurrentUser
+  getCurrentUser,
+  clearAuth
 } from './store/slices/authSlice';
 import { setScreenSize } from './store/slices/uiSlice';
 import { useTranslation } from 'react-i18next';
@@ -121,6 +122,9 @@ const App: React.FC = () => {
       const token = localStorage.getItem('rtf_access_token');
       if (token) {
         dispatch(getCurrentUser());
+      } else {
+        // Redux state claims authenticated but token is gone — clear stale state without API call
+        dispatch(clearAuth());
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -90,6 +90,24 @@ class FormsApiService {
     return inner?.formDefinition ?? inner;
   }
 
+  // Get all saved instances for a form (uses the same GET /:formId endpoint)
+  async getFormInstances(formId: string): Promise<FormInstanceData[]> {
+    const response = await api.get(`/forms/${formId}`);
+    const inner = response.data?.data ?? response.data;
+    const instances: any[] = inner?.instances ?? [];
+    return instances.map((inst) => ({
+      instanceId: inst.instanceId,
+      formDefinitionId: formId,
+      data: {},
+      status: inst.status,
+      // Normalize ISO datetime string to plain date (e.g. "2025-12-31T00:00:00.000Z" → "2025-12-31")
+      reportingPeriod: String(inst.reportingPeriod).split('T')[0],
+      createdAt: inst.createdAt,
+      updatedAt: inst.updatedAt,
+      submittedAt: inst.submittedAt
+    }));
+  }
+
   // Get form instance (user's saved data)
   async getFormInstance(formId: string, reportingPeriod: string): Promise<FormInstanceData | null> {
     try {

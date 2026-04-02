@@ -157,6 +157,7 @@ interface RequiredFieldEntry {
   label: string;
   errorLabel: string;
   dataType: 'si6' | 'mi1' | 'pi2' | 'ii3' | 'di5' | 'bi7' | 'ei8' | 'text';
+  domainCode?: string; // For ei8 enum fields: the domain code to look up options
 }
 
 export class XBRLSchemaParser {
@@ -903,15 +904,21 @@ export class XBRLSchemaParser {
 
     if (!fields || fields.length === 0) return null;
 
-    const formFields: FormField[] = fields.map((entry) => ({
-      id: `req_${entry.fieldKey}`,
-      name: entry.fieldKey,
-      label: entry.label,
-      dataType: entry.dataType,
-      required: true,
-      conceptId: entry.assertionId,
-      helpText: entry.errorLabel,
-    }));
+    const formFields: FormField[] = fields.map((entry) => {
+      const field: FormField = {
+        id: `req_${entry.fieldKey}`,
+        name: entry.fieldKey,
+        label: entry.label,
+        dataType: entry.dataType,
+        required: true,
+        conceptId: entry.assertionId,
+        helpText: entry.errorLabel,
+      };
+      if (entry.dataType === 'ei8' && entry.domainCode) {
+        field.enumOptions = this.domainOptions.get(entry.domainCode) ?? [];
+      }
+      return field;
+    });
 
     return {
       id: 'required_section',

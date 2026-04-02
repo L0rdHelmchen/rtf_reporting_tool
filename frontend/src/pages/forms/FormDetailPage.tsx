@@ -65,31 +65,9 @@ const FormDetailPage: React.FC = () => {
         const definition = await formsApi.getFormDefinition(formId);
         setFormDefinition(definition);
 
-        // Load form instances for different reporting periods
-        // This is a mock - in reality we'd have an endpoint to get all instances
-        const mockInstances: FormInstanceData[] = [
-          {
-            instanceId: 'inst-1',
-            formDefinitionId: formId,
-            data: {},
-            status: 'completed' as FormStatus,
-            createdAt: '2024-01-15T10:00:00Z',
-            updatedAt: '2024-01-20T15:30:00Z',
-            submittedAt: '2024-01-20T15:30:00Z',
-            validatedAt: '2024-01-20T16:00:00Z',
-            reportingPeriod: '2023-12-31'
-          },
-          {
-            instanceId: 'inst-2',
-            formDefinitionId: formId,
-            data: {},
-            status: 'in_review' as FormStatus,
-            createdAt: '2024-02-01T09:00:00Z',
-            updatedAt: '2024-02-15T14:20:00Z',
-            reportingPeriod: '2024-03-31'
-          }
-        ];
-        setFormInstances(mockInstances);
+        // Load real form instances from the backend
+        const instances = await formsApi.getFormInstances(formId);
+        setFormInstances(instances);
 
         // Load form history (mock data)
         const mockHistory = [
