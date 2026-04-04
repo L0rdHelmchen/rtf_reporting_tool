@@ -119,12 +119,16 @@ const FormRenderer: React.FC<FormRendererProps> = ({
 
         switch (field.dataType) {
           case 'si6':
-          case 'text':
-            fieldSchema = z.string();
+          case 'text': {
+            const isEmail = field.label.toLowerCase().includes('mail') || field.name.toLowerCase().includes('mail');
+            fieldSchema = isEmail
+              ? z.string().email('Bitte geben Sie eine gültige E-Mail-Adresse ein')
+              : z.string();
             if (field.validation?.maxLength) {
               fieldSchema = fieldSchema.max(field.validation.maxLength);
             }
             break;
+          }
           case 'mi1':
             fieldSchema = z.coerce.number();
             if (field.validation?.min !== undefined) {
@@ -211,13 +215,16 @@ const FormRenderer: React.FC<FormRendererProps> = ({
     };
 
     switch (field.dataType) {
-      case 'si6':
+      case 'si6': {
+        const isEmail = field.label.toLowerCase().includes('mail') || field.name.toLowerCase().includes('mail');
         return (
           <TextFieldSI6
             {...baseProps}
-            maxLength={field.validation?.maxLength || 6}
+            maxLength={isEmail ? 254 : (field.validation?.maxLength || 6)}
+            inputType={isEmail ? 'email' : 'text'}
           />
         );
+      }
       case 'mi1':
         return (
           <MoneyFieldMI1

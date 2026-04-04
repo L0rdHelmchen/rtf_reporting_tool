@@ -58,7 +58,7 @@ export class XBRLGeneratorService {
     options: XBRLInstanceOptions
   ): Promise<XBRLGenerationResult> {
     try {
-      console.log(`Generating XBRL instance for form ${formId}`);
+      console.log(`Generating XBRL instance for form ${formId}, formData keys: ${Object.keys(formData || {}).join(', ')}`);
 
       // Get form definition
       const formDefinition = await this.schemaParser.getFormDefinition(formId);
@@ -128,64 +128,33 @@ export class XBRLGeneratorService {
   ): Promise<XBRLContext[]> {
     const contexts: XBRLContext[] = [];
 
-    // Create base context for instant facts
-    const instantContext: XBRLContext = {
+    // Base instant context
+    contexts.push({
       id: `instant_${options.reportingPeriod}`,
       entity: {
-        identifier: options.entityIdentifier,
-        scheme: options.entityIdentifierScheme
+        identifier: {
+          scheme: options.entityIdentifierScheme,
+          value: options.entityIdentifier
+        }
       },
-      period: {
-        instant: options.reportingPeriod
-      }
-    };
-    contexts.push(instantContext);
+      period: { instant: options.reportingPeriod }
+    });
 
-    // Create duration context if period dates are provided
+    // Duration context if period start/end are provided
     if (options.reportingPeriodStart && options.reportingPeriodEnd) {
-      const durationContext: XBRLContext = {
+      contexts.push({
         id: `duration_${options.reportingPeriod}`,
         entity: {
-          identifier: options.entityIdentifier,
-          scheme: options.entityIdentifierScheme
+          identifier: {
+            scheme: options.entityIdentifierScheme,
+            value: options.entityIdentifier
+          }
         },
         period: {
           startDate: options.reportingPeriodStart,
           endDate: options.reportingPeriodEnd
         }
-      };
-      contexts.push(durationContext);
-    }
-
-    // Generate dimensional contexts based on form structure
-    for (const section of formDefinition.sections || []) {
-      for (const field of section.fields || []) {
-        if (field.dimensions && field.dimensions.length > 0) {
-          // Create context with dimensional information
-          const dimensionalContext: XBRLContext = {
-            id: `${field.concept}_${options.reportingPeriod}`,
-            entity: {
-              identifier: options.entityIdentifier,
-              scheme: options.entityIdentifierScheme
-            },
-            period: {
-              instant: options.reportingPeriod
-            },
-            scenario: {
-              explicitMembers: new Map()
-            }
-          };
-
-          // Add dimensional members
-          for (const dimension of field.dimensions) {
-            if (formData[dimension]) {
-              dimensionalContext.scenario!.explicitMembers!.set(dimension, formData[dimension]);
-            }
-          }
-
-          contexts.push(dimensionalContext);
-        }
-      }
+      });
     }
 
     return contexts;
@@ -201,40 +170,27 @@ export class XBRLGeneratorService {
     options: XBRLInstanceOptions
   ): Promise<XBRLFact[]> {
     const facts: XBRLFact[] = [];
+    const contextRef = contexts[0].id;
 
     for (const section of formDefinition.sections || []) {
       for (const field of section.fields || []) {
-        const fieldValue = formData[field.concept];
+        const fieldValue = formData[field.name];
+        if (fieldValue === undefined || fieldValue === null || fieldValue === '') continue;
 
-        if (fieldValue !== undefined && fieldValue !== null && fieldValue !== '') {
-          // Find appropriate context
-          let contextRef = contexts[0].id; // Default to first context
+        const convertedValue = this.convertFieldValue(field, fieldValue);
+        const isNumeric = ['mi1', 'pi2', 'ii3'].includes(field.dataType);
 
-          if (field.dimensions && field.dimensions.length > 0) {
-            const dimensionalContext = contexts.find(ctx =>
-              ctx.id === `${field.concept}_${options.reportingPeriod}`
-            );
-            if (dimensionalContext) {
-              contextRef = dimensionalContext.id;
-            }
-          }
-
-          // Convert value based on field type
-          const convertedValue = this.convertFieldValue(field, fieldValue);
-
-          const fact: XBRLFact = {
-            concept: field.concept,
-            contextRef,
-            value: convertedValue,
-            unitRef: this.getUnitRef(field.dataType, options.currency),
-            decimals: options.decimals !== undefined ? options.decimals.toString() : undefined
-          };
-
-          facts.push(fact);
-        }
+        facts.push({
+          concept: field.name,
+          contextRef,
+          value: convertedValue,
+          unitRef: isNumeric ? this.getUnitRef(field.dataType, options.currency) : undefined,
+          decimals: isNumeric && options.decimals !== undefined ? options.decimals.toString() : undefined
+        });
       }
     }
 
+    console.log(`Generated ${facts.length} XBRL facts`);
     return facts;
   }
 
@@ -276,7 +232,8 @@ export class XBRLGeneratorService {
   }
 
   /**
-   * Build the complete XBRL document
+   * Build the complete XBRL instance document as a well-formed XML string.
+   * Uses direct string construction to avoid libxmljs2 namespace API quirks.
    */
   private async buildXBRLDocument(
     formDefinition: FormDefinition,
@@ -284,92 +241,76 @@ export class XBRLGeneratorService {
     facts: XBRLFact[],
     options: XBRLInstanceOptions
   ): Promise<string> {
-    // Create XML document
-    const doc = new libxmljs.Document();
+    const x = (s: string) => s
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
 
-    // Create root element with namespaces
-    const xbrl = doc.node('xbrl');
-    xbrl.namespace('http://www.xbrl.org/2003/instance', null);
-    xbrl.namespace('http://www.xbrl.org/2003/linkbase', 'link');
-    xbrl.namespace('http://www.w3.org/1999/xlink', 'xlink');
-    xbrl.namespace('http://www.w3.org/2001/XMLSchema-instance', 'xsi');
-    xbrl.namespace('http://www.bundesbank.de/xbrl/rtf', 'rtf');
+    const lines: string[] = [];
 
-    // Add schema reference
-    const schemaLocation = xbrl.node('schemaRef');
-    schemaLocation.namespace('http://www.xbrl.org/2003/linkbase', 'link');
-    schemaLocation.attr({
-      'xlink:type': 'simple',
-      'xlink:href': options.schemaRef
-    });
+    lines.push('<?xml version="1.0" encoding="UTF-8"?>');
+    lines.push('<xbrli:xbrl');
+    lines.push('  xmlns:xbrli="http://www.xbrl.org/2003/instance"');
+    lines.push('  xmlns:link="http://www.xbrl.org/2003/linkbase"');
+    lines.push('  xmlns:xlink="http://www.w3.org/1999/xlink"');
+    lines.push('  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"');
+    lines.push('  xmlns:rtf="http://www.bundesbank.de/xbrl/rtf"');
+    lines.push('  xmlns:iso4217="http://www.xbrl.org/2003/iso4217">');
+    lines.push('');
+    lines.push(`  <link:schemaRef xlink:type="simple" xlink:href="${x(options.schemaRef)}"/>`);
 
-    // Add contexts
+    // Contexts
     for (const context of contexts) {
-      const contextNode = xbrl.node('context');
-      contextNode.attr('id', context.id);
-
-      // Entity
-      const entityNode = contextNode.node('entity');
-      const identifierNode = entityNode.node('identifier');
-      identifierNode.attr('scheme', context.entity.scheme);
-      identifierNode.text(context.entity.identifier);
-
-      // Scenario (for dimensional data)
-      if (context.scenario && context.scenario.explicitMembers) {
-        const scenarioNode = contextNode.node('scenario');
-        for (const [dimension, member] of context.scenario.explicitMembers) {
-          const explicitMemberNode = scenarioNode.node('explicitMember');
-          explicitMemberNode.attr('dimension', dimension);
-          explicitMemberNode.text(member);
-        }
-      }
-
-      // Period
-      const periodNode = contextNode.node('period');
+      const entity = context.entity.identifier as any;
+      const scheme = entity?.scheme ?? '';
+      const identifierValue = entity?.value ?? entity ?? '';
+      lines.push('');
+      lines.push(`  <xbrli:context id="${x(context.id)}">`);
+      lines.push('    <xbrli:entity>');
+      lines.push(`      <xbrli:identifier scheme="${x(scheme)}">${x(String(identifierValue))}</xbrli:identifier>`);
+      lines.push('    </xbrli:entity>');
+      lines.push('    <xbrli:period>');
       if (context.period.instant) {
-        periodNode.node('instant').text(context.period.instant);
+        lines.push(`      <xbrli:instant>${x(context.period.instant)}</xbrli:instant>`);
       } else if (context.period.startDate && context.period.endDate) {
-        periodNode.node('startDate').text(context.period.startDate);
-        periodNode.node('endDate').text(context.period.endDate);
+        lines.push(`      <xbrli:startDate>${x(context.period.startDate)}</xbrli:startDate>`);
+        lines.push(`      <xbrli:endDate>${x(context.period.endDate)}</xbrli:endDate>`);
       }
+      lines.push('    </xbrli:period>');
+      lines.push('  </xbrli:context>');
     }
 
-    // Add units
+    // Units (only for facts that have a unitRef)
     const units = new Set<string>();
     for (const fact of facts) {
-      if (fact.unitRef) {
-        units.add(fact.unitRef);
-      }
+      if (fact.unitRef) units.add(fact.unitRef);
     }
-
     for (const unit of units) {
-      const unitNode = xbrl.node('unit');
-      unitNode.attr('id', unit);
+      lines.push('');
+      lines.push(`  <xbrli:unit id="${x(unit)}">`);
       if (unit === 'pure') {
-        unitNode.node('measure').text('xbrli:pure');
+        lines.push('    <xbrli:measure>xbrli:pure</xbrli:measure>');
       } else {
-        unitNode.node('measure').text(`iso4217:${unit}`);
+        lines.push(`    <xbrli:measure>iso4217:${x(unit)}</xbrli:measure>`);
       }
+      lines.push('  </xbrli:unit>');
     }
 
-    // Add facts
+    // Facts
+    lines.push('');
     for (const fact of facts) {
-      const factNode = xbrl.node(fact.concept.replace(':', '_'));
-      factNode.namespace('http://www.bundesbank.de/xbrl/rtf', 'rtf');
-      factNode.attr('contextRef', fact.contextRef);
-
-      if (fact.unitRef) {
-        factNode.attr('unitRef', fact.unitRef);
-      }
-
-      if (fact.decimals !== undefined) {
-        factNode.attr('decimals', fact.decimals);
-      }
-
-      factNode.text(fact.value);
+      let attrs = `contextRef="${x(fact.contextRef)}"`;
+      if (fact.unitRef) attrs += ` unitRef="${x(fact.unitRef)}"`;
+      if (fact.decimals !== undefined) attrs += ` decimals="${x(String(fact.decimals))}"`;
+      const val = x(String(fact.value));
+      lines.push(`  <rtf:${fact.concept} ${attrs}>${val}</rtf:${fact.concept}>`);
     }
 
-    return doc.toString();
+    lines.push('');
+    lines.push('</xbrli:xbrl>');
+
+    return lines.join('\n');
   }
 
   /**

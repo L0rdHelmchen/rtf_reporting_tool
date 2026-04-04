@@ -40,6 +40,11 @@ import { Link as RouterLink, useNavigate, useSearchParams } from 'react-router-d
 import { useDebounce } from 'use-debounce';
 import { FORM_CATEGORY_NAMES_DE, FormStatus } from '@rtf-tool/shared';
 import { formsApi, FormListItem, FormSearchParams } from '../../services/formsApi';
+import {
+  getFormDependency,
+  getFormApplicability,
+  FormRequirement
+} from '../../utils/formDependencies';
 
 // Form creation dialog component
 interface NewFormDialogProps {
@@ -156,6 +161,9 @@ const FormsPage: React.FC = () => {
   // Dialog state
   const [newFormDialogOpen, setNewFormDialogOpen] = useState(false);
 
+  // DBL Berichtsumfang (x030) — drives form dependency badges
+  const [berichtsumfang, setBerichtsumfang] = useState<string | undefined>(undefined);
+
   // Filter state – initialized from URL query params
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState(searchParams.get('category') || '');
@@ -226,6 +234,16 @@ const FormsPage: React.FC = () => {
     loadReportingPeriods();
   }, [loadAvailableForms, loadReportingPeriods]);
 
+  // Load DBL instance to determine Berichtsumfang for dependency logic
+  useEffect(() => {
+    const period = selectedPeriod || new Date().getFullYear() + '-12-31';
+    formsApi.getFormInstance('dbl', period)
+      .then(inst => {
+        setBerichtsumfang(inst?.data?.x030);
+      })
+      .catch(() => setBerichtsumfang(undefined));
+  }, [selectedPeriod]);
+
   // Event handlers
   const handleCategoryFilter = (category: string) => {
     const next = category === selectedCategory ? '' : category;
@@ -272,6 +290,33 @@ const FormsPage: React.FC = () => {
 
   const formatDate = (dateString: string): string => {
     return new Date(dateString).toLocaleDateString('de-DE');
+  };
+
+  const getDependencyBadge = (form: FormListItem) => {
+    const dep = getFormDependency(form.code);
+    if (!dep) return null;
+
+    const applicability = getFormApplicability(form.code, berichtsumfang);
+
+    const colorMap: Record<FormRequirement, 'success' | 'warning' | 'info'> = {
+      always: 'success',
+      consolidated: 'info',
+      per_steuerungskreis: 'warning'
+    };
+
+    const chipColor = applicability === 'not_applicable' ? 'default' : colorMap[dep.requirement];
+    const label = applicability === 'not_applicable' ? 'Nicht relevant' : dep.label;
+
+    return (
+      <Chip
+        label={label}
+        size="small"
+        color={chipColor}
+        variant="outlined"
+        title={dep.description}
+        sx={{ fontSize: '0.65rem' }}
+      />
+    );
   };
 
   // Loading skeleton
@@ -333,6 +378,23 @@ const FormsPage: React.FC = () => {
       {error && (
         <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError(null)}>
           {error}
+        </Alert>
+      )}
+
+      {/* Dependency hint when DBL Berichtsumfang not yet set */}
+      {berichtsumfang === undefined && (
+        <Alert severity="info" sx={{ mb: 3 }}>
+          Füllen Sie im <strong>DBL-Vordruck</strong> das Feld <strong>Berichtsumfang</strong> aus, um zu sehen, welche Formulare für Ihr Institut relevant sind (GRP/STA nur bei zusammengefasster Meldung).
+        </Alert>
+      )}
+      {berichtsumfang !== undefined && berichtsumfang !== 'x02' && (
+        <Alert severity="success" sx={{ mb: 3 }}>
+          Berichtsumfang: <strong>Einzelinstitut</strong> — GRP und STA sind für diese Meldung nicht erforderlich.
+        </Alert>
+      )}
+      {berichtsumfang === 'x02' && (
+        <Alert severity="info" sx={{ mb: 3 }}>
+          Berichtsumfang: <strong>Zusammengefasste Meldung</strong> — GRP und STA sind einzureichen.
         </Alert>
       )}
 
@@ -478,7 +540,10 @@ const FormsPage: React.FC = () => {
                       </Typography>
                     )}
                     <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 1 }}>
-                      <Chip label={form.category} size="small" variant="outlined" />
+                      <Stack direction="row" spacing={0.5} flexWrap="wrap">
+                        <Chip label={form.category} size="small" variant="outlined" />
+                        {getDependencyBadge(form)}
+                      </Stack>
                       <Typography variant="caption" color="text.secondary">
                         v{form.version}
                       </Typography>

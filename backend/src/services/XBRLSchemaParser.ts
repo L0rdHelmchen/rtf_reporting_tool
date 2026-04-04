@@ -912,7 +912,6 @@ export class XBRLSchemaParser {
         dataType: entry.dataType,
         required: true,
         conceptId: entry.assertionId,
-        helpText: entry.errorLabel,
       };
       if (entry.dataType === 'ei8' && entry.domainCode) {
         field.enumOptions = this.domainOptions.get(entry.domainCode) ?? [];
@@ -1110,7 +1109,11 @@ export class XBRLSchemaParser {
         if (value !== undefined && value !== null && value !== '') {
           // Validate based on data type
           if (!this.validateFieldValue(field, value)) {
-            errors.push({ field: field.name, message: `Ungültiger Wert für ${field.label}` });
+            const isEmail = field.label?.toLowerCase().includes('mail') || field.name?.toLowerCase().includes('mail');
+            const msg = isEmail
+              ? `Bitte geben Sie eine gültige E-Mail-Adresse ein`
+              : `Ungültiger Wert für ${field.label}`;
+            errors.push({ field: field.name, message: msg });
           }
 
           // Validate against field validation rules
@@ -1157,7 +1160,14 @@ export class XBRLSchemaParser {
       case 'bi7': // Boolean
         return typeof value === 'boolean' || value === 'true' || value === 'false';
       case 'si6': // String
-      case 'text':
+      case 'text': {
+        if (typeof value !== 'string') return false;
+        const isEmail = field.label?.toLowerCase().includes('mail') || field.name?.toLowerCase().includes('mail');
+        if (isEmail && value !== '') {
+          return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+        }
+        return true;
+      }
       default:
         return typeof value === 'string';
     }

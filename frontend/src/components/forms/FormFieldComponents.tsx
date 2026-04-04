@@ -30,7 +30,7 @@ interface BaseFieldProps {
 }
 
 // SI6 - Text field (6 characters max)
-export const TextFieldSI6: React.FC<BaseFieldProps & { maxLength?: number }> = ({
+export const TextFieldSI6: React.FC<BaseFieldProps & { maxLength?: number; inputType?: string }> = ({
   name,
   label,
   control,
@@ -38,7 +38,8 @@ export const TextFieldSI6: React.FC<BaseFieldProps & { maxLength?: number }> = (
   disabled = false,
   helperText,
   error = false,
-  maxLength = 6
+  maxLength = 6,
+  inputType = 'text'
 }) => (
   <Controller
     name={name}
@@ -48,6 +49,7 @@ export const TextFieldSI6: React.FC<BaseFieldProps & { maxLength?: number }> = (
       <TextField
         {...field}
         fullWidth
+        type={inputType}
         label={label}
         error={error || !!fieldState.error}
         helperText={fieldState.error?.message || helperText}
@@ -314,7 +316,11 @@ export const EnumFieldEI: React.FC<BaseFieldProps & {
           ))}
         </Select>
         {(fieldState.error?.message || helperText) && (
-          <Typography variant="caption" color="error" sx={{ mt: 0.5, ml: 1.75 }}>
+          <Typography
+            variant="caption"
+            color={fieldState.error ? 'error' : 'text.secondary'}
+            sx={{ mt: 0.5, ml: 1.75 }}
+          >
             {fieldState.error?.message || helperText}
           </Typography>
         )}
