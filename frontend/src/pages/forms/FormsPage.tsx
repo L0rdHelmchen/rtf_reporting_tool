@@ -1,5 +1,5 @@
 // RTF Reporting Tool - Forms Page
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Box,
   Typography,
@@ -151,15 +151,13 @@ const FormsPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const institution = useSelector(selectInstitution);
 
-  const isConsolidated: boolean | undefined = institution
-    ? ((institution as any).isConsolidatedReporting ?? false)
-    : undefined;
-  const accountingStandard: 'hgb' | 'ifrs' | 'hgb_and_ifrs' | undefined =
-    (institution as any)?.accountingStandard ?? undefined;
+  const instAny = institution as any;
+  const isConsolidated: boolean = instAny?.isConsolidatedReporting === true;
+  const accountingStandard: 'hgb' | 'ifrs' | 'hgb_and_ifrs' =
+    instAny?.accountingStandard ?? 'hgb';
 
   // State management
   const [forms, setForms] = useState<FormListItem[]>([]);
-  const [availableForms, setAvailableForms] = useState<FormListItem[]>([]);
   const [reportingPeriods, setReportingPeriods] = useState<Array<{ id: string; label: string; isActive: boolean }>>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -186,6 +184,15 @@ const FormsPage: React.FC = () => {
   // Debounced search
   const [debouncedSearchTerm] = useDebounce(searchTerm, 500);
 
+  // Filter by institution applicability in render — so it always reacts to Redux institution changes
+  // without needing to re-fetch. 'conditional' is treated as 'not_applicable' here (conservative default).
+  const visibleForms = useMemo(() =>
+    forms.filter(f =>
+      getFormApplicability(f.code, isConsolidated, accountingStandard) !== 'not_applicable'
+    ),
+    [forms, isConsolidated, accountingStandard]
+  );
+
   // Load data
   const loadForms = useCallback(async (params?: FormSearchParams) => {
     try {
@@ -202,34 +209,16 @@ const FormsPage: React.FC = () => {
         ...params
       });
 
-      // Filter out forms that are not applicable for this institution
-      // (e.g. GRP/STA when Einzelinstitut, RDP-BI when no IFRS)
-      const applicable = response.forms.filter(
-        f => getFormApplicability(f.code, isConsolidated, accountingStandard) !== 'not_applicable'
-      );
-
-      setForms(applicable);
-      setTotalForms(applicable.length);
-      setTotalPages(Math.ceil(applicable.length / 12) || 1);
+      setForms(response.forms);
+      setTotalForms(response.total);
+      setTotalPages(response.totalPages);
     } catch (err: any) {
       setError(err.message || 'Fehler beim Laden der Formulare');
       console.error('Error loading forms:', err);
     } finally {
       setLoading(false);
     }
-  }, [debouncedSearchTerm, selectedCategory, selectedStatus, selectedPeriod, currentPage, isConsolidated, accountingStandard]);
-
-  const loadAvailableForms = useCallback(async () => {
-    try {
-      const response = await formsApi.getFormDefinitions({ limit: 500 });
-      const applicable = response.forms.filter(
-        f => getFormApplicability(f.code, isConsolidated, accountingStandard) !== 'not_applicable'
-      );
-      setAvailableForms(applicable);
-    } catch (err) {
-      console.error('Error loading available forms:', err);
-    }
-  }, [isConsolidated, accountingStandard]);
+  }, [debouncedSearchTerm, selectedCategory, selectedStatus, selectedPeriod, currentPage]);
 
   const loadReportingPeriods = useCallback(async () => {
     try {
@@ -246,9 +235,8 @@ const FormsPage: React.FC = () => {
   }, [loadForms]);
 
   useEffect(() => {
-    loadAvailableForms();
     loadReportingPeriods();
-  }, [loadAvailableForms, loadReportingPeriods]);
+  }, [loadReportingPeriods]);
 
   // Event handlers
   const handleCategoryFilter = (category: string) => {
@@ -362,7 +350,7 @@ const FormsPage: React.FC = () => {
             RTF Formulare
           </Typography>
           <Typography variant="body1" color="text.secondary">
-            Verwaltung und Bearbeitung der RTF-Meldungen ({totalForms} verfügbar)
+            Verwaltung und Bearbeitung der RTF-Meldungen ({visibleForms.length} verfügbar)
           </Typography>
         </Box>
         <Stack direction="row" spacing={1}>
@@ -393,7 +381,7 @@ const FormsPage: React.FC = () => {
       )}
 
       {/* Meldeumfang-Banner — abgeleitet aus Institutionsdaten */}
-      {isConsolidated === undefined && (
+      {institution === null && (
         <Alert severity="warning" sx={{ mb: 3 }}>
           Institutionsdaten konnten nicht geladen werden. Bitte erneut anmelden.
         </Alert>
@@ -404,7 +392,7 @@ const FormsPage: React.FC = () => {
           {isConsolidated ? 'Zusammengefasste Meldung (GRP/STA erforderlich)' : 'Einzelinstitut'}
           {' · '}
           <strong>Rechnungslegung:</strong>{' '}
-          {{ hgb: 'HGB (RDP-BH)', ifrs: 'IFRS (RDP-BI)', hgb_and_ifrs: 'HGB + IFRS (RDP-BH & RDP-BI)' }[accountingStandard ?? 'hgb']}
+          {{ hgb: 'HGB (RDP-BH)', ifrs: 'IFRS (RDP-BI)', hgb_and_ifrs: 'HGB + IFRS (RDP-BH & RDP-BI)' }[accountingStandard]}
         </Alert>
       )}
 
@@ -487,7 +475,7 @@ const FormsPage: React.FC = () => {
               <FormCardSkeleton />
             </Grid>
           ))
-        ) : forms.length === 0 ? (
+        ) : visibleForms.length === 0 ? (
           // No forms found
           <Grid item xs={12}>
             <Paper sx={{ p: 4, textAlign: 'center' }}>
@@ -509,7 +497,7 @@ const FormsPage: React.FC = () => {
           </Grid>
         ) : (
           // Form cards
-          forms.map((form) => (
+          visibleForms.map((form) => (
             <Grid item xs={12} md={6} lg={4} key={`${form.id}-${form.reportingPeriod}`}>
               <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
                 <CardContent sx={{ flexGrow: 1 }}>
@@ -587,7 +575,7 @@ const FormsPage: React.FC = () => {
       </Grid>
 
       {/* Pagination */}
-      {!loading && forms.length > 0 && totalPages > 1 && (
+      {!loading && visibleForms.length > 0 && totalPages > 1 && (
         <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
           <Pagination
             count={totalPages}
@@ -606,7 +594,7 @@ const FormsPage: React.FC = () => {
         open={newFormDialogOpen}
         onClose={() => setNewFormDialogOpen(false)}
         onCreateForm={handleCreateForm}
-        availableForms={availableForms}
+        availableForms={visibleForms}
         reportingPeriods={reportingPeriods}
       />
     </Box>

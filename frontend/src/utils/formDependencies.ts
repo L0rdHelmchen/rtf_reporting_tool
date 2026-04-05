@@ -70,7 +70,7 @@ const DEPENDENCY_RULES: Array<{ prefixes: string[]; info: FormDependencyInfo }> 
     }
   },
   {
-    prefixes: ['GRP', 'STA'],
+    prefixes: ['GR', 'GRP', 'STA'],
     info: {
       requirement: 'consolidated',
       label: 'Zusammengefasste Basis',

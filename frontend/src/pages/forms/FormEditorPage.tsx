@@ -67,8 +67,18 @@ const FormEditorPage: React.FC = () => {
 
         // If no instance exists, create a new one
         if (!instance) {
-          const newInstance = await formsApi.createFormInstance(formId, reportingPeriod);
-          setFormInstance(newInstance);
+          try {
+            const newInstance = await formsApi.createFormInstance(formId, reportingPeriod);
+            setFormInstance(newInstance);
+          } catch (createErr: any) {
+            // 409 = instance already exists (race condition or period mismatch) — fetch it
+            if (createErr.response?.status === 409) {
+              const existing = await formsApi.getFormInstance(formId, reportingPeriod);
+              setFormInstance(existing);
+            } else {
+              throw createErr;
+            }
+          }
         }
       } catch (err: any) {
         setError(err.message || 'Fehler beim Laden des Formulars');
