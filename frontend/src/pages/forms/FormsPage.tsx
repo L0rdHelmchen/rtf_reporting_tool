@@ -38,8 +38,10 @@ import {
 } from '@mui/icons-material';
 import { Link as RouterLink, useNavigate, useSearchParams } from 'react-router-dom';
 import { useDebounce } from 'use-debounce';
+import { useSelector } from 'react-redux';
 import { FORM_CATEGORY_NAMES_DE, FormStatus } from '@rtf-tool/shared';
 import { formsApi, FormListItem, FormSearchParams } from '../../services/formsApi';
+import { selectInstitution } from '../../store/slices/authSlice';
 import {
   getFormDependency,
   getFormApplicability,
@@ -147,6 +149,13 @@ const NewFormDialog: React.FC<NewFormDialogProps> = ({
 const FormsPage: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const institution = useSelector(selectInstitution);
+
+  const isConsolidated: boolean | undefined = institution
+    ? ((institution as any).isConsolidatedReporting ?? false)
+    : undefined;
+  const accountingStandard: 'hgb' | 'ifrs' | 'hgb_and_ifrs' | undefined =
+    (institution as any)?.accountingStandard ?? undefined;
 
   // State management
   const [forms, setForms] = useState<FormListItem[]>([]);
@@ -161,18 +170,16 @@ const FormsPage: React.FC = () => {
   // Dialog state
   const [newFormDialogOpen, setNewFormDialogOpen] = useState(false);
 
-  // DBL Berichtsumfang (x030) — drives form dependency badges
-  const [berichtsumfang, setBerichtsumfang] = useState<string | undefined>(undefined);
-
   // Filter state – initialized from URL query params
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState(searchParams.get('category') || '');
-  const [selectedStatus, setSelectedStatus] = useState<FormStatus | ''>('');
+  const [selectedStatus, setSelectedStatus] = useState<FormStatus | ''>((searchParams.get('status') as FormStatus) || '');
   const [selectedPeriod, setSelectedPeriod] = useState('');
 
-  // Sync selectedCategory when URL changes (e.g. sidebar click)
+  // Sync category and status when URL changes (e.g. sidebar click or dashboard button)
   useEffect(() => {
     setSelectedCategory(searchParams.get('category') || '');
+    setSelectedStatus((searchParams.get('status') as FormStatus) || '');
     setCurrentPage(1);
   }, [searchParams]);
 
@@ -195,25 +202,34 @@ const FormsPage: React.FC = () => {
         ...params
       });
 
-      setForms(response.forms);
-      setTotalForms(response.total);
-      setTotalPages(response.totalPages);
+      // Filter out forms that are not applicable for this institution
+      // (e.g. GRP/STA when Einzelinstitut, RDP-BI when no IFRS)
+      const applicable = response.forms.filter(
+        f => getFormApplicability(f.code, isConsolidated, accountingStandard) !== 'not_applicable'
+      );
+
+      setForms(applicable);
+      setTotalForms(applicable.length);
+      setTotalPages(Math.ceil(applicable.length / 12) || 1);
     } catch (err: any) {
       setError(err.message || 'Fehler beim Laden der Formulare');
       console.error('Error loading forms:', err);
     } finally {
       setLoading(false);
     }
-  }, [debouncedSearchTerm, selectedCategory, selectedStatus, selectedPeriod, currentPage]);
+  }, [debouncedSearchTerm, selectedCategory, selectedStatus, selectedPeriod, currentPage, isConsolidated, accountingStandard]);
 
   const loadAvailableForms = useCallback(async () => {
     try {
-      const response = await formsApi.getFormDefinitions({ limit: 100 });
-      setAvailableForms(response.forms);
+      const response = await formsApi.getFormDefinitions({ limit: 500 });
+      const applicable = response.forms.filter(
+        f => getFormApplicability(f.code, isConsolidated, accountingStandard) !== 'not_applicable'
+      );
+      setAvailableForms(applicable);
     } catch (err) {
       console.error('Error loading available forms:', err);
     }
-  }, []);
+  }, [isConsolidated, accountingStandard]);
 
   const loadReportingPeriods = useCallback(async () => {
     try {
@@ -233,16 +249,6 @@ const FormsPage: React.FC = () => {
     loadAvailableForms();
     loadReportingPeriods();
   }, [loadAvailableForms, loadReportingPeriods]);
-
-  // Load DBL instance to determine Berichtsumfang for dependency logic
-  useEffect(() => {
-    const period = selectedPeriod || new Date().getFullYear() + '-12-31';
-    formsApi.getFormInstance('dbl', period)
-      .then(inst => {
-        setBerichtsumfang(inst?.data?.x030);
-      })
-      .catch(() => setBerichtsumfang(undefined));
-  }, [selectedPeriod]);
 
   // Event handlers
   const handleCategoryFilter = (category: string) => {
@@ -268,12 +274,13 @@ const FormsPage: React.FC = () => {
     loadForms();
   };
   // Helper functions
-  const getStatusColor = (status: FormStatus): 'default' | 'warning' | 'info' | 'success' => {
+  const getStatusColor = (status: FormStatus): 'default' | 'warning' | 'info' | 'success' | 'error' => {
     switch (status) {
       case 'draft': return 'default';
       case 'in_review': return 'warning';
       case 'submitted': return 'info';
-      case 'completed': return 'success';
+      case 'accepted': return 'success';
+      case 'rejected': return 'error';
       default: return 'default';
     }
   };
@@ -283,7 +290,8 @@ const FormsPage: React.FC = () => {
       case 'draft': return 'Entwurf';
       case 'in_review': return 'In Prüfung';
       case 'submitted': return 'Eingereicht';
-      case 'completed': return 'Abgeschlossen';
+      case 'accepted': return 'Akzeptiert';
+      case 'rejected': return 'Abgelehnt';
       default: return status;
     }
   };
@@ -296,12 +304,15 @@ const FormsPage: React.FC = () => {
     const dep = getFormDependency(form.code);
     if (!dep) return null;
 
-    const applicability = getFormApplicability(form.code, berichtsumfang);
+    const applicability = getFormApplicability(form.code, isConsolidated, accountingStandard);
 
     const colorMap: Record<FormRequirement, 'success' | 'warning' | 'info'> = {
       always: 'success',
       consolidated: 'info',
-      per_steuerungskreis: 'warning'
+      per_steuerungskreis: 'warning',
+      per_sk_ifrs: 'warning',
+      per_sk_hgb: 'warning',
+      per_sk_barwertig: 'warning'
     };
 
     const chipColor = applicability === 'not_applicable' ? 'default' : colorMap[dep.requirement];
@@ -381,20 +392,19 @@ const FormsPage: React.FC = () => {
         </Alert>
       )}
 
-      {/* Dependency hint when DBL Berichtsumfang not yet set */}
-      {berichtsumfang === undefined && (
-        <Alert severity="info" sx={{ mb: 3 }}>
-          Füllen Sie im <strong>DBL-Vordruck</strong> das Feld <strong>Berichtsumfang</strong> aus, um zu sehen, welche Formulare für Ihr Institut relevant sind (GRP/STA nur bei zusammengefasster Meldung).
+      {/* Meldeumfang-Banner — abgeleitet aus Institutionsdaten */}
+      {isConsolidated === undefined && (
+        <Alert severity="warning" sx={{ mb: 3 }}>
+          Institutionsdaten konnten nicht geladen werden. Bitte erneut anmelden.
         </Alert>
       )}
-      {berichtsumfang !== undefined && berichtsumfang !== 'x02' && (
-        <Alert severity="success" sx={{ mb: 3 }}>
-          Berichtsumfang: <strong>Einzelinstitut</strong> — GRP und STA sind für diese Meldung nicht erforderlich.
-        </Alert>
-      )}
-      {berichtsumfang === 'x02' && (
-        <Alert severity="info" sx={{ mb: 3 }}>
-          Berichtsumfang: <strong>Zusammengefasste Meldung</strong> — GRP und STA sind einzureichen.
+      {institution !== null && (
+        <Alert severity="info" sx={{ mb: 3 }} icon={false}>
+          <strong>Meldeumfang:</strong>{' '}
+          {isConsolidated ? 'Zusammengefasste Meldung (GRP/STA erforderlich)' : 'Einzelinstitut'}
+          {' · '}
+          <strong>Rechnungslegung:</strong>{' '}
+          {{ hgb: 'HGB (RDP-BH)', ifrs: 'IFRS (RDP-BI)', hgb_and_ifrs: 'HGB + IFRS (RDP-BH & RDP-BI)' }[accountingStandard ?? 'hgb']}
         </Alert>
       )}
 
@@ -428,7 +438,8 @@ const FormsPage: React.FC = () => {
                 <MenuItem value="draft">Entwurf</MenuItem>
                 <MenuItem value="in_review">In Prüfung</MenuItem>
                 <MenuItem value="submitted">Eingereicht</MenuItem>
-                <MenuItem value="completed">Abgeschlossen</MenuItem>
+                <MenuItem value="accepted">Akzeptiert</MenuItem>
+                <MenuItem value="rejected">Abgelehnt</MenuItem>
               </Select>
             </FormControl>
           </Grid>

@@ -56,7 +56,9 @@ export default async function authRoutes(
                 id: { type: 'string' },
                 name: { type: 'string' },
                 bik: { type: 'string' },
-                instituteType: { type: 'string' }
+                instituteType: { type: 'string' },
+                isConsolidatedReporting: { type: 'boolean' },
+                accountingStandard: { type: 'string' }
               }
             },
             accessToken: { type: 'string' },
@@ -111,6 +113,8 @@ export default async function authRoutes(
           i.name as inst_name,
           i.bik as inst_bik,
           i.institute_type as inst_type,
+          i.is_consolidated_reporting as inst_consolidated,
+          i.accounting_standard as inst_accounting_standard,
           i.active as inst_active
         FROM users u
         JOIN institutions i ON u.institution_id = i.id
@@ -198,7 +202,8 @@ export default async function authRoutes(
           bik: userRow.inst_bik,
           instituteType: userRow.inst_type,
           exemptionCategory: 'none',
-          isConsolidatedReporting: false,
+          isConsolidatedReporting: userRow.inst_consolidated === true || userRow.inst_consolidated === 't',
+          accountingStandard: userRow.inst_accounting_standard ?? 'hgb',
           addressCountry: 'DE',
           active: userRow.inst_active,
           createdAt: new Date(),

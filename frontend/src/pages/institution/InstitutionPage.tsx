@@ -13,25 +13,13 @@ import {
   Chip,
   Divider,
   Stack,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
   FormControl,
   InputLabel,
   Select,
   MenuItem,
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
-  List,
-  ListItem,
-  ListItemText,
-  ListItemIcon,
-  Switch,
   FormControlLabel,
-  Tooltip,
-  IconButton,
+  Switch,
+  CircularProgress,
   Tab,
   Tabs
 } from '@mui/material';
@@ -40,135 +28,136 @@ import {
   Save,
   Cancel,
   Business,
-  Security,
+  AccountBalance,
   Settings,
-  ExpandMore,
-  CheckCircle,
-  Warning,
-  Info,
-  Add,
-  Delete,
-  History
+  CheckCircle
 } from '@mui/icons-material';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { useAppSelector } from '../../store';
-import { selectInstitution, selectUser } from '../../store/slices/authSlice';
+import { useAppSelector, useAppDispatch } from '../../store';
+import { selectInstitution, selectUser, updateInstitution } from '../../store/slices/authSlice';
+import api from '../../services/api';
 
-// Institution data schema
+const ACCOUNTING_STANDARD_LABELS: Record<string, string> = {
+  hgb: 'HGB (Handelsgesetzbuch)',
+  ifrs: 'IFRS (International Financial Reporting Standards)',
+  hgb_and_ifrs: 'HGB und IFRS'
+};
+
+const ACCOUNTING_STANDARD_HINTS: Record<string, string> = {
+  hgb: 'Einzureichen: RDP-BH',
+  ifrs: 'Einzureichen: RDP-BI',
+  hgb_and_ifrs: 'Einzureichen: RDP-BH und RDP-BI'
+};
+
+const INSTITUTE_TYPE_LABELS: Record<string, string> = {
+  bank: 'Kreditbank',
+  savings_bank: 'Sparkasse',
+  cooperative_bank: 'Genossenschaftsbank',
+  building_society: 'Bausparkasse',
+  investment_firm: 'Wertpapierfirma',
+  other: 'Sonstiges'
+};
+
 const institutionSchema = z.object({
   name: z.string().min(1, 'Name ist erforderlich'),
-  bik: z.string().regex(/^[A-Z0-9]{8,11}$/, 'Ungültige BIC/BLZ Format'),
-  instituteType: z.string().min(1, 'Institutstyp ist erforderlich'),
   addressStreet: z.string().optional(),
   addressCity: z.string().optional(),
   addressPostalCode: z.string().optional(),
   addressCountry: z.string().default('DE'),
-  contactEmail: z.string().email().optional(),
+  contactPerson: z.string().optional(),
+  contactEmail: z.string().email('Ungültige E-Mail-Adresse').or(z.literal('')).optional(),
   contactPhone: z.string().optional(),
-  reportingContact: z.string().optional(),
-  reportingEmail: z.string().email().optional(),
-  supervisoryAuthority: z.string().optional()
+  isConsolidatedReporting: z.boolean().default(false),
+  accountingStandard: z.enum(['hgb', 'ifrs', 'hgb_and_ifrs']).default('hgb')
 });
 
 type InstitutionFormData = z.infer<typeof institutionSchema>;
 
-// Exemption/Befreiung data
-interface Exemption {
-  id: string;
-  formCode: string;
-  formName: string;
-  exemptionType: 'complete' | 'partial';
-  validFrom: string;
-  validTo?: string;
-  reason: string;
-  isActive: boolean;
-}
+const TabPanel = ({ children, value, index }: { children: React.ReactNode; value: number; index: number }) => (
+  <div hidden={value !== index}>
+    {value === index && <Box sx={{ py: 3, px: 1 }}>{children}</Box>}
+  </div>
+);
 
 const InstitutionPage: React.FC = () => {
-  const institution = useAppSelector(selectInstitution);
+  const institution = useAppSelector(selectInstitution) as any;
   const user = useAppSelector(selectUser);
+  const dispatch = useAppDispatch();
 
-  // State management
   const [activeTab, setActiveTab] = useState(0);
   const [editMode, setEditMode] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [exemptions, setExemptions] = useState<Exemption[]>([]);
-  const [exemptionDialogOpen, setExemptionDialogOpen] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveSuccess, setSaveSuccess] = useState(false);
 
-  // Form handling
   const {
     control,
     handleSubmit,
     reset,
+    watch,
     formState: { errors, isDirty }
   } = useForm<InstitutionFormData>({
     resolver: zodResolver(institutionSchema),
     defaultValues: {
-      name: institution?.name || '',
-      bik: institution?.bik || '',
-      instituteType: institution?.instituteType || '',
-      addressStreet: institution?.addressStreet || '',
-      addressCity: institution?.addressCity || '',
-      addressPostalCode: institution?.addressPostalCode || '',
-      addressCountry: institution?.addressCountry || 'DE',
-      contactEmail: institution?.contactEmail || '',
-      contactPhone: institution?.contactPhone || '',
-      reportingContact: institution?.reportingContact || '',
-      reportingEmail: institution?.reportingEmail || '',
-      supervisoryAuthority: institution?.supervisoryAuthority || 'Deutsche Bundesbank'
+      name: institution?.name ?? '',
+      addressStreet: institution?.addressStreet ?? '',
+      addressCity: institution?.addressCity ?? '',
+      addressPostalCode: institution?.addressPostalCode ?? '',
+      addressCountry: institution?.addressCountry ?? 'DE',
+      contactPerson: institution?.contactPerson ?? '',
+      contactEmail: institution?.contactEmail ?? '',
+      contactPhone: institution?.contactPhone ?? '',
+      isConsolidatedReporting: institution?.isConsolidatedReporting ?? false,
+      accountingStandard: institution?.accountingStandard ?? 'hgb'
     }
   });
 
-  // Load exemptions data
+  // Re-populate form when institution loads from Redux
   useEffect(() => {
-    const loadExemptions = async () => {
-      // Mock exemptions data
-      const mockExemptions: Exemption[] = [
-        {
-          id: 'ex-1',
-          formCode: 'GRP31',
-          formName: 'Unternehmen mit Freistellung nach § 2a',
-          exemptionType: 'complete',
-          validFrom: '2024-01-01',
-          validTo: '2024-12-31',
-          reason: 'Kleininstitut nach § 2a KWG',
-          isActive: true
-        },
-        {
-          id: 'ex-2',
-          formCode: 'RSK12',
-          formName: 'Adressenausfallrisiko - Kredite',
-          exemptionType: 'partial',
-          validFrom: '2024-01-01',
-          reason: 'Vereinfachtes Verfahren für Sparkassen',
-          isActive: true
-        }
-      ];
-      setExemptions(mockExemptions);
-    };
+    if (institution) {
+      reset({
+        name: institution.name ?? '',
+        addressStreet: institution.addressStreet ?? '',
+        addressCity: institution.addressCity ?? '',
+        addressPostalCode: institution.addressPostalCode ?? '',
+        addressCountry: institution.addressCountry ?? 'DE',
+        contactPerson: institution.contactPerson ?? '',
+        contactEmail: institution.contactEmail ?? '',
+        contactPhone: institution.contactPhone ?? '',
+        isConsolidatedReporting: institution.isConsolidatedReporting ?? false,
+        accountingStandard: institution.accountingStandard ?? 'hgb'
+      });
+    }
+  }, [institution, reset]);
 
-    loadExemptions();
-  }, []);
+  const watchedStandard = watch('accountingStandard');
+  const watchedConsolidated = watch('isConsolidatedReporting');
 
-  // Event handlers
+  const canEdit = user?.role === 'admin' || user?.role === 'compliance_officer';
+
   const onSubmit = async (data: InstitutionFormData) => {
+    if (!institution?.id) return;
     setLoading(true);
-    try {
-      // TODO: Implement actual API call
-      console.log('Saving institution data:', data);
+    setSaveError(null);
+    setSaveSuccess(false);
 
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
+    try {
+      const res = await api.put(`/institutions/${institution.id}`, data);
+      const updated = res.data?.data;
+
+      dispatch(updateInstitution({
+        ...data,
+        isConsolidatedReporting: updated?.isConsolidatedReporting ?? data.isConsolidatedReporting,
+        accountingStandard: updated?.accountingStandard ?? data.accountingStandard
+      } as any));
 
       setEditMode(false);
-      setError(null);
-
-      // TODO: Update Redux store with new data
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 4000);
     } catch (err: any) {
-      setError(err.message || 'Fehler beim Speichern der Institutsdaten');
+      setSaveError(err.response?.data?.message || err.message || 'Speichern fehlgeschlagen');
     } finally {
       setLoading(false);
     }
@@ -177,74 +166,64 @@ const InstitutionPage: React.FC = () => {
   const handleCancel = () => {
     reset();
     setEditMode(false);
-    setError(null);
+    setSaveError(null);
   };
 
-  const handleAddExemption = () => {
-    setExemptionDialogOpen(true);
-  };
-
-  const toggleExemption = (exemptionId: string) => {
-    setExemptions(prev => prev.map(ex =>
-      ex.id === exemptionId ? { ...ex, isActive: !ex.isActive } : ex
-    ));
-  };
-
-  const deleteExemption = (exemptionId: string) => {
-    setExemptions(prev => prev.filter(ex => ex.id !== exemptionId));
-  };
-
-  // Tab panels
-  const TabPanel = ({ children, value, index }: { children: React.ReactNode; value: number; index: number }) => (
-    <div hidden={value !== index}>
-      {value === index && <Box sx={{ py: 3 }}>{children}</Box>}
-    </div>
-  );
+  if (!institution) {
+    return (
+      <Box display="flex" justifyContent="center" alignItems="center" minHeight="40vh">
+        <CircularProgress />
+      </Box>
+    );
+  }
 
   return (
     <Box>
-      <Typography variant="h4" gutterBottom>
-        Institutsverwaltung
-      </Typography>
-      <Typography variant="body1" color="text.secondary" paragraph>
-        Verwaltung der Institutsdaten und Befreiungen für RTF-Meldungen
+      <Typography variant="h4" gutterBottom>Institution</Typography>
+      <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
+        Stammdaten, Meldeumfang und Rechnungslegungsstandard Ihres Instituts
       </Typography>
 
-      {error && (
-        <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError(null)}>
-          {error}
+      {saveSuccess && (
+        <Alert severity="success" sx={{ mb: 3 }}>
+          Daten erfolgreich gespeichert.
+        </Alert>
+      )}
+      {saveError && (
+        <Alert severity="error" sx={{ mb: 3 }} onClose={() => setSaveError(null)}>
+          {saveError}
         </Alert>
       )}
 
-      {/* Institution Status Card */}
+      {/* Status Card */}
       <Card sx={{ mb: 3 }}>
         <CardContent>
           <Box display="flex" justifyContent="space-between" alignItems="flex-start">
             <Box>
-              <Typography variant="h6" gutterBottom>
-                {institution?.name || 'Institution Name'}
-              </Typography>
-              <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
+              <Typography variant="h6" gutterBottom>{institution.name}</Typography>
+              <Stack direction="row" spacing={1} flexWrap="wrap">
                 <Chip
                   icon={<Business />}
-                  label={institution?.instituteType || 'Institutstyp'}
+                  label={INSTITUTE_TYPE_LABELS[institution.instituteType] ?? institution.instituteType}
                   variant="outlined"
+                  size="small"
+                />
+                <Chip icon={<CheckCircle />} label="Aktiv" color="success" variant="outlined" size="small" />
+                <Chip
+                  icon={<AccountBalance />}
+                  label={institution.isConsolidatedReporting ? 'Zusammengefasste Meldung' : 'Einzelinstitut'}
+                  color={institution.isConsolidatedReporting ? 'info' : 'default'}
+                  variant="outlined"
+                  size="small"
                 />
                 <Chip
-                  icon={<CheckCircle />}
-                  label="Aktiv"
-                  color="success"
+                  label={ACCOUNTING_STANDARD_LABELS[institution.accountingStandard] ?? institution.accountingStandard}
                   variant="outlined"
-                />
-                <Chip
-                  label={`${exemptions.filter(ex => ex.isActive).length} Befreiungen`}
-                  color="info"
-                  variant="outlined"
+                  size="small"
                 />
               </Stack>
-              <Typography variant="body2" color="text.secondary">
-                BIC/BLZ: {institution?.bik || 'Nicht angegeben'} •
-                Land: {institution?.addressCountry || 'DE'}
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                BIK: {institution.bik} · Land: {institution.addressCountry ?? 'DE'}
               </Typography>
             </Box>
             <Box>
@@ -253,22 +232,18 @@ const InstitutionPage: React.FC = () => {
                   variant="outlined"
                   startIcon={<Edit />}
                   onClick={() => setEditMode(true)}
-                  disabled={user?.role !== 'admin' && user?.role !== 'compliance_officer'}
+                  disabled={!canEdit}
                 >
                   Bearbeiten
                 </Button>
               ) : (
                 <Stack direction="row" spacing={1}>
-                  <Button
-                    variant="outlined"
-                    startIcon={<Cancel />}
-                    onClick={handleCancel}
-                  >
+                  <Button variant="outlined" startIcon={<Cancel />} onClick={handleCancel}>
                     Abbrechen
                   </Button>
                   <Button
                     variant="contained"
-                    startIcon={<Save />}
+                    startIcon={loading ? <CircularProgress size={16} color="inherit" /> : <Save />}
                     onClick={handleSubmit(onSubmit)}
                     disabled={loading || !isDirty}
                   >
@@ -281,372 +256,252 @@ const InstitutionPage: React.FC = () => {
         </CardContent>
       </Card>
 
-      {/* Tabs */}
-      <Paper sx={{ mb: 3 }}>
+      <Paper>
         <Tabs
           value={activeTab}
-          onChange={(_, newValue) => setActiveTab(newValue)}
+          onChange={(_, v) => setActiveTab(v)}
           sx={{ borderBottom: 1, borderColor: 'divider' }}
         >
-          <Tab icon={<Business />} label="Stammdaten" />
-          <Tab icon={<Security />} label="Befreiungen" />
-          <Tab icon={<Settings />} label="Einstellungen" />
+          <Tab icon={<Business />} iconPosition="start" label="Stammdaten" />
+          <Tab icon={<Settings />} iconPosition="start" label="Meldeumfang &amp; Rechnungslegung" />
         </Tabs>
 
-        {/* Stammdaten Tab */}
+        {/* ── Tab 0: Stammdaten ── */}
         <TabPanel value={activeTab} index={0}>
-          <form onSubmit={handleSubmit(onSubmit)}>
-            <Grid container spacing={3}>
-              {/* Grunddaten */}
-              <Grid item xs={12}>
-                <Typography variant="h6" gutterBottom>
-                  Grunddaten
-                </Typography>
-              </Grid>
-
-              <Grid item xs={12} md={6}>
-                <Controller
-                  name="name"
-                  control={control}
-                  render={({ field }) => (
-                    <TextField
-                      {...field}
-                      fullWidth
-                      label="Institutionsname"
-                      error={!!errors.name}
-                      helperText={errors.name?.message}
-                      disabled={!editMode}
-                      required
-                    />
-                  )}
-                />
-              </Grid>
-
-              <Grid item xs={12} md={6}>
-                <Controller
-                  name="bik"
-                  control={control}
-                  render={({ field }) => (
-                    <TextField
-                      {...field}
-                      fullWidth
-                      label="BIC/Bankleitzahl"
-                      error={!!errors.bik}
-                      helperText={errors.bik?.message}
-                      disabled={!editMode}
-                      required
-                    />
-                  )}
-                />
-              </Grid>
-
-              <Grid item xs={12} md={6}>
-                <Controller
-                  name="instituteType"
-                  control={control}
-                  render={({ field }) => (
-                    <FormControl fullWidth disabled={!editMode}>
-                      <InputLabel>Institutstyp</InputLabel>
-                      <Select {...field} label="Institutstyp">
-                        <MenuItem value="Kreditinstitut">Kreditinstitut</MenuItem>
-                        <MenuItem value="Sparkasse">Sparkasse</MenuItem>
-                        <MenuItem value="Genossenschaftsbank">Genossenschaftsbank</MenuItem>
-                        <MenuItem value="Landesbank">Landesbank</MenuItem>
-                        <MenuItem value="Privatbank">Privatbank</MenuItem>
-                        <MenuItem value="Bausparkasse">Bausparkasse</MenuItem>
-                        <MenuItem value="Sonstiges">Sonstiges</MenuItem>
-                      </Select>
-                    </FormControl>
-                  )}
-                />
-              </Grid>
-
-              <Grid item xs={12} md={6}>
-                <Controller
-                  name="supervisoryAuthority"
-                  control={control}
-                  render={({ field }) => (
-                    <TextField
-                      {...field}
-                      fullWidth
-                      label="Aufsichtsbehörde"
-                      disabled={!editMode}
-                    />
-                  )}
-                />
-              </Grid>
-
-              {/* Adresse */}
-              <Grid item xs={12}>
-                <Divider sx={{ my: 2 }} />
-                <Typography variant="h6" gutterBottom>
-                  Adresse
-                </Typography>
-              </Grid>
-
-              <Grid item xs={12} md={8}>
-                <Controller
-                  name="addressStreet"
-                  control={control}
-                  render={({ field }) => (
-                    <TextField
-                      {...field}
-                      fullWidth
-                      label="Straße und Hausnummer"
-                      disabled={!editMode}
-                    />
-                  )}
-                />
-              </Grid>
-
-              <Grid item xs={12} md={4}>
-                <Controller
-                  name="addressPostalCode"
-                  control={control}
-                  render={({ field }) => (
-                    <TextField
-                      {...field}
-                      fullWidth
-                      label="Postleitzahl"
-                      disabled={!editMode}
-                    />
-                  )}
-                />
-              </Grid>
-
-              <Grid item xs={12} md={6}>
-                <Controller
-                  name="addressCity"
-                  control={control}
-                  render={({ field }) => (
-                    <TextField
-                      {...field}
-                      fullWidth
-                      label="Stadt"
-                      disabled={!editMode}
-                    />
-                  )}
-                />
-              </Grid>
-
-              <Grid item xs={12} md={6}>
-                <Controller
-                  name="addressCountry"
-                  control={control}
-                  render={({ field }) => (
-                    <TextField
-                      {...field}
-                      fullWidth
-                      label="Land"
-                      disabled={!editMode}
-                    />
-                  )}
-                />
-              </Grid>
-
-              {/* Kontakt */}
-              <Grid item xs={12}>
-                <Divider sx={{ my: 2 }} />
-                <Typography variant="h6" gutterBottom>
-                  Kontaktdaten
-                </Typography>
-              </Grid>
-
-              <Grid item xs={12} md={6}>
-                <Controller
-                  name="contactEmail"
-                  control={control}
-                  render={({ field }) => (
-                    <TextField
-                      {...field}
-                      fullWidth
-                      label="E-Mail"
-                      type="email"
-                      error={!!errors.contactEmail}
-                      helperText={errors.contactEmail?.message}
-                      disabled={!editMode}
-                    />
-                  )}
-                />
-              </Grid>
-
-              <Grid item xs={12} md={6}>
-                <Controller
-                  name="contactPhone"
-                  control={control}
-                  render={({ field }) => (
-                    <TextField
-                      {...field}
-                      fullWidth
-                      label="Telefon"
-                      disabled={!editMode}
-                    />
-                  )}
-                />
-              </Grid>
-
-              <Grid item xs={12} md={6}>
-                <Controller
-                  name="reportingContact"
-                  control={control}
-                  render={({ field }) => (
-                    <TextField
-                      {...field}
-                      fullWidth
-                      label="Ansprechpartner Meldewesen"
-                      disabled={!editMode}
-                    />
-                  )}
-                />
-              </Grid>
-
-              <Grid item xs={12} md={6}>
-                <Controller
-                  name="reportingEmail"
-                  control={control}
-                  render={({ field }) => (
-                    <TextField
-                      {...field}
-                      fullWidth
-                      label="E-Mail Meldewesen"
-                      type="email"
-                      error={!!errors.reportingEmail}
-                      helperText={errors.reportingEmail?.message}
-                      disabled={!editMode}
-                    />
-                  )}
-                />
-              </Grid>
+          <Grid container spacing={3}>
+            <Grid item xs={12} md={6}>
+              <Controller
+                name="name"
+                control={control}
+                render={({ field }) => (
+                  <TextField
+                    {...field}
+                    fullWidth
+                    label="Institutsname"
+                    error={!!errors.name}
+                    helperText={errors.name?.message}
+                    disabled={!editMode}
+                    required
+                  />
+                )}
+              />
             </Grid>
-          </form>
+            <Grid item xs={12} md={6}>
+              <TextField
+                fullWidth
+                label="BIK (Bankleitzahl)"
+                value={institution.bik}
+                disabled
+                helperText="Nicht änderbar"
+              />
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <TextField
+                fullWidth
+                label="Institutstyp"
+                value={INSTITUTE_TYPE_LABELS[institution.instituteType] ?? institution.instituteType}
+                disabled
+                helperText="Nicht änderbar"
+              />
+            </Grid>
+
+            <Grid item xs={12}><Divider /></Grid>
+            <Grid item xs={12}>
+              <Typography variant="subtitle1" gutterBottom>Adresse</Typography>
+            </Grid>
+
+            <Grid item xs={12}>
+              <Controller
+                name="addressStreet"
+                control={control}
+                render={({ field }) => (
+                  <TextField {...field} fullWidth label="Straße und Hausnummer" disabled={!editMode} />
+                )}
+              />
+            </Grid>
+            <Grid item xs={12} md={4}>
+              <Controller
+                name="addressPostalCode"
+                control={control}
+                render={({ field }) => (
+                  <TextField {...field} fullWidth label="PLZ" disabled={!editMode} />
+                )}
+              />
+            </Grid>
+            <Grid item xs={12} md={5}>
+              <Controller
+                name="addressCity"
+                control={control}
+                render={({ field }) => (
+                  <TextField {...field} fullWidth label="Stadt" disabled={!editMode} />
+                )}
+              />
+            </Grid>
+            <Grid item xs={12} md={3}>
+              <Controller
+                name="addressCountry"
+                control={control}
+                render={({ field }) => (
+                  <TextField {...field} fullWidth label="Land" disabled={!editMode} />
+                )}
+              />
+            </Grid>
+
+            <Grid item xs={12}><Divider /></Grid>
+            <Grid item xs={12}>
+              <Typography variant="subtitle1" gutterBottom>Kontakt</Typography>
+            </Grid>
+
+            <Grid item xs={12} md={6}>
+              <Controller
+                name="contactPerson"
+                control={control}
+                render={({ field }) => (
+                  <TextField {...field} fullWidth label="Ansprechpartner" disabled={!editMode} />
+                )}
+              />
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <Controller
+                name="contactEmail"
+                control={control}
+                render={({ field }) => (
+                  <TextField
+                    {...field}
+                    fullWidth
+                    label="E-Mail"
+                    type="email"
+                    error={!!errors.contactEmail}
+                    helperText={errors.contactEmail?.message}
+                    disabled={!editMode}
+                  />
+                )}
+              />
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <Controller
+                name="contactPhone"
+                control={control}
+                render={({ field }) => (
+                  <TextField {...field} fullWidth label="Telefon" disabled={!editMode} />
+                )}
+              />
+            </Grid>
+          </Grid>
         </TabPanel>
 
-        {/* Befreiungen Tab */}
+        {/* ── Tab 1: Meldeumfang & Rechnungslegung ── */}
         <TabPanel value={activeTab} index={1}>
-          <Box display="flex" justifyContent="space-between" alignItems="center" sx={{ mb: 3 }}>
-            <Typography variant="h6">
-              Befreiungen ({exemptions.filter(ex => ex.isActive).length} aktiv)
-            </Typography>
-            <Button
-              variant="contained"
-              startIcon={<Add />}
-              onClick={handleAddExemption}
-              disabled={user?.role !== 'admin' && user?.role !== 'compliance_officer'}
-            >
-              Neue Befreiung
-            </Button>
-          </Box>
-
-          {exemptions.length === 0 ? (
-            <Alert severity="info">
-              Keine Befreiungen konfiguriert.
-            </Alert>
-          ) : (
-            exemptions.map((exemption) => (
-              <Accordion key={exemption.id}>
-                <AccordionSummary expandIcon={<ExpandMore />}>
-                  <Box display="flex" alignItems="center" gap={2} width="100%">
-                    <Typography variant="subtitle1">
-                      {exemption.formCode} - {exemption.formName}
-                    </Typography>
-                    <Box sx={{ flexGrow: 1 }} />
-                    <Chip
-                      label={exemption.exemptionType === 'complete' ? 'Vollständig' : 'Teilweise'}
-                      color={exemption.exemptionType === 'complete' ? 'success' : 'warning'}
-                      size="small"
-                    />
-                    <Chip
-                      label={exemption.isActive ? 'Aktiv' : 'Inaktiv'}
-                      color={exemption.isActive ? 'success' : 'default'}
-                      size="small"
-                    />
-                  </Box>
-                </AccordionSummary>
-                <AccordionDetails>
-                  <Grid container spacing={2}>
-                    <Grid item xs={12} md={6}>
-                      <Typography variant="body2" color="text.secondary">
-                        Gültig von: {new Date(exemption.validFrom).toLocaleDateString('de-DE')}
-                      </Typography>
-                      {exemption.validTo && (
-                        <Typography variant="body2" color="text.secondary">
-                          Gültig bis: {new Date(exemption.validTo).toLocaleDateString('de-DE')}
-                        </Typography>
-                      )}
-                    </Grid>
-                    <Grid item xs={12}>
-                      <Typography variant="body2" paragraph>
-                        <strong>Begründung:</strong> {exemption.reason}
-                      </Typography>
-                    </Grid>
-                    <Grid item xs={12}>
-                      <Box display="flex" gap={1} alignItems="center">
-                        <FormControlLabel
-                          control={
-                            <Switch
-                              checked={exemption.isActive}
-                              onChange={() => toggleExemption(exemption.id)}
-                            />
-                          }
-                          label="Aktiv"
-                        />
-                        <Tooltip title="Befreiung löschen">
-                          <IconButton
-                            onClick={() => deleteExemption(exemption.id)}
-                            color="error"
-                            size="small"
-                          >
-                            <Delete />
-                          </IconButton>
-                        </Tooltip>
-                      </Box>
-                    </Grid>
-                  </Grid>
-                </AccordionDetails>
-              </Accordion>
-            ))
-          )}
-        </TabPanel>
-
-        {/* Einstellungen Tab */}
-        <TabPanel value={activeTab} index={2}>
           <Alert severity="info" sx={{ mb: 3 }}>
-            Systemeinstellungen werden in einer späteren Version verfügbar sein.
+            Diese Einstellungen bestimmen automatisch, welche RTF-Vordrucke für Ihr Institut einzureichen sind.
+            Sie wirken sich sofort auf die Formularübersicht aus.
           </Alert>
 
-          <Typography variant="h6" gutterBottom>
-            Systemeinstellungen
-          </Typography>
+          <Grid container spacing={4}>
+            {/* Meldeumfang */}
+            <Grid item xs={12} md={6}>
+              <Typography variant="subtitle1" gutterBottom fontWeight={600}>
+                Meldeumfang
+              </Typography>
+              <Controller
+                name="isConsolidatedReporting"
+                control={control}
+                render={({ field }) => (
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={field.value}
+                        onChange={e => field.onChange(e.target.checked)}
+                        disabled={!editMode}
+                      />
+                    }
+                    label={
+                      <Box>
+                        <Typography variant="body1">Zusammengefasste Meldung</Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          Für Institutsgruppen, Finanzholdinggruppen und gemischte Finanzholdinggruppen
+                        </Typography>
+                      </Box>
+                    }
+                  />
+                )}
+              />
+              <Box sx={{ mt: 2 }}>
+                <Chip
+                  size="small"
+                  color={watchedConsolidated ? 'info' : 'default'}
+                  label={watchedConsolidated
+                    ? 'GRP und STA sind einzureichen'
+                    : 'GRP und STA entfallen (Einzelinstitut)'}
+                />
+              </Box>
+            </Grid>
 
-          <List>
-            <ListItem>
-              <ListItemIcon>
-                <History />
-              </ListItemIcon>
-              <ListItemText
-                primary="Audit-Protokoll"
-                secondary="Übersicht über alle Änderungen und Aktivitäten"
+            {/* Rechnungslegungsstandard */}
+            <Grid item xs={12} md={6}>
+              <Typography variant="subtitle1" gutterBottom fontWeight={600}>
+                Rechnungslegungsstandard
+              </Typography>
+              <Controller
+                name="accountingStandard"
+                control={control}
+                render={({ field }) => (
+                  <FormControl fullWidth disabled={!editMode}>
+                    <InputLabel>Rechnungslegungsstandard</InputLabel>
+                    <Select {...field} label="Rechnungslegungsstandard">
+                      {Object.entries(ACCOUNTING_STANDARD_LABELS).map(([value, label]) => (
+                        <MenuItem key={value} value={value}>
+                          <Box>
+                            <Typography variant="body2">{label}</Typography>
+                            <Typography variant="caption" color="text.secondary">
+                              {ACCOUNTING_STANDARD_HINTS[value]}
+                            </Typography>
+                          </Box>
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                )}
               />
-            </ListItem>
-            <ListItem>
-              <ListItemIcon>
-                <Security />
-              </ListItemIcon>
-              <ListItemText
-                primary="Sicherheitseinstellungen"
-                secondary="Passwort-Richtlinien und Zugriffskontrollen"
-              />
-            </ListItem>
-            <ListItem>
-              <ListItemIcon>
-                <Settings />
-              </ListItemIcon>
-              <ListItemText
-                primary="System-Konfiguration"
-                secondary="Allgemeine Systemeinstellungen"
-              />
-            </ListItem>
-          </List>
+              <Box sx={{ mt: 2 }}>
+                <Chip
+                  size="small"
+                  color="warning"
+                  variant="outlined"
+                  label={ACCOUNTING_STANDARD_HINTS[watchedStandard ?? 'hgb']}
+                />
+              </Box>
+            </Grid>
+
+            {/* Zusammenfassung */}
+            <Grid item xs={12}>
+              <Divider />
+              <Box sx={{ mt: 2, p: 2, bgcolor: 'background.default', borderRadius: 1 }}>
+                <Typography variant="subtitle2" gutterBottom>Daraus ergibt sich folgender Meldeumfang:</Typography>
+                <Stack direction="row" spacing={1} flexWrap="wrap">
+                  {['DBL', 'RTFK', 'STG', 'KPL', 'ILAAP'].map(f => (
+                    <Chip key={f} label={f} size="small" color="success" />
+                  ))}
+                  {watchedConsolidated && ['GRP', 'STA'].map(f => (
+                    <Chip key={f} label={f} size="small" color="info" />
+                  ))}
+                  {['STKK', 'RSK', 'RDP-R'].map(f => (
+                    <Chip key={f} label={f} size="small" color="warning" variant="outlined" />
+                  ))}
+                  {(watchedStandard === 'hgb' || watchedStandard === 'hgb_and_ifrs') && (
+                    <Chip label="RDP-BH" size="small" color="warning" variant="outlined" />
+                  )}
+                  {(watchedStandard === 'ifrs' || watchedStandard === 'hgb_and_ifrs') && (
+                    <Chip label="RDP-BI" size="small" color="warning" variant="outlined" />
+                  )}
+                  <Chip label="RDP-BW" size="small" color="warning" variant="outlined" />
+                </Stack>
+                <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                  Grün = Pflicht · Blau = nur zusammengefasste Basis · Orange = je Steuerungskreis
+                </Typography>
+              </Box>
+            </Grid>
+          </Grid>
         </TabPanel>
       </Paper>
     </Box>

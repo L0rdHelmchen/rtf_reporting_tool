@@ -94,6 +94,11 @@ const authSlice = createSlice({
     clearError: (state) => {
       state.error = null;
     },
+    updateInstitution: (state, action: PayloadAction<Partial<typeof state.institution>>) => {
+      if (state.institution) {
+        state.institution = { ...state.institution, ...action.payload } as any;
+      }
+    },
     updateLastActivity: (state) => {
       state.lastActivity = Date.now();
     },
@@ -191,7 +196,7 @@ const authSlice = createSlice({
 });
 
 // Export actions
-export const { clearError, updateLastActivity, setTokens, clearTokens, clearAuth } = authSlice.actions;
+export const { clearError, updateLastActivity, setTokens, clearTokens, clearAuth, updateInstitution } = authSlice.actions;
 
 // Selectors
 export const selectAuth = (state: { auth: AuthState }) => state.auth;

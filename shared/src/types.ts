@@ -15,6 +15,13 @@ export const InstitutionType = z.enum([
 ]);
 export type InstitutionType = z.infer<typeof InstitutionType>;
 
+export const AccountingStandard = z.enum([
+  'hgb',
+  'ifrs',
+  'hgb_and_ifrs'
+]);
+export type AccountingStandard = z.infer<typeof AccountingStandard>;
+
 export const ExemptionCategory = z.enum([
   'section_53b',
   'section_53c',
@@ -64,6 +71,7 @@ export const Institution = z.object({
   exemptionCategory: ExemptionCategory.optional(),
   parentInstitutionId: z.string().uuid().optional(),
   isConsolidatedReporting: z.boolean().default(false),
+  accountingStandard: AccountingStandard.default('hgb'),
   addressStreet: z.string().max(255).optional(),
   addressCity: z.string().max(100).optional(),
   addressPostalCode: z.string().max(20).optional(),

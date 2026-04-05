@@ -6,10 +6,15 @@
  * once per Steuerungskreis.
  */
 
+export type AccountingStandard = 'hgb' | 'ifrs' | 'hgb_and_ifrs';
+
 export type FormRequirement =
-  | 'always'            // stets einzureichen
-  | 'consolidated'      // nur zusammengefasste Basis (x030 = x02)
-  | 'per_steuerungskreis'; // je Steuerungskreis
+  | 'always'              // stets einzureichen
+  | 'consolidated'        // nur zusammengefasste Basis
+  | 'per_steuerungskreis' // je Steuerungskreis (alle Standards)
+  | 'per_sk_ifrs'         // je Steuerungskreis, nur bei IFRS-Abschluss
+  | 'per_sk_hgb'          // je Steuerungskreis, nur bei HGB-Abschluss
+  | 'per_sk_barwertig';   // je Steuerungskreis, barwertig (RDP-BW)
 
 export interface FormDependencyInfo {
   requirement: FormRequirement;
@@ -74,11 +79,51 @@ const DEPENDENCY_RULES: Array<{ prefixes: string[]; info: FormDependencyInfo }> 
     }
   },
   {
-    prefixes: ['STKK', 'RDP', 'RSK'],
+    prefixes: ['STKK', 'RSK'],
     info: {
       requirement: 'per_steuerungskreis',
       label: 'Je Steuerungskreis',
       description: 'Für jeden zum Meldestichtag relevanten Steuerungskreis einzureichen.'
+    }
+  },
+  {
+    prefixes: ['RDP-BI'],
+    info: {
+      requirement: 'per_sk_ifrs',
+      label: 'Je SK – IFRS',
+      description: 'Einzureichen für jeden Steuerungskreis, bei dem das RDP ausgehend von einem IFRS-Jahres- oder -Zwischenabschluss abgeleitet wird.'
+    }
+  },
+  {
+    prefixes: ['RDP-BH'],
+    info: {
+      requirement: 'per_sk_hgb',
+      label: 'Je SK – HGB',
+      description: 'Einzureichen für jeden Steuerungskreis, bei dem das RDP ausgehend von einem HGB-Jahres- oder -Zwischenabschluss abgeleitet wird.'
+    }
+  },
+  {
+    prefixes: ['RDP-BW'],
+    info: {
+      requirement: 'per_sk_barwertig',
+      label: 'Je SK – Barwertig',
+      description: 'Einzureichen für jeden Steuerungskreis, bei dem das RDP barwertig abgeleitet wird.'
+    }
+  },
+  {
+    prefixes: ['RDP-R'],
+    info: {
+      requirement: 'per_steuerungskreis',
+      label: 'Je SK – Regulatorisch',
+      description: 'Einzureichen für jeden Steuerungskreis, bei dem das RDP ausgehend von den regulatorischen Eigenmitteln abgeleitet wird.'
+    }
+  },
+  {
+    prefixes: ['RDP'],
+    info: {
+      requirement: 'per_steuerungskreis',
+      label: 'Je Steuerungskreis',
+      description: 'RDP-Vordruck je relevantem Steuerungskreis einzureichen.'
     }
   }
 ];
@@ -101,35 +146,42 @@ export function getFormDependency(code: string): FormDependencyInfo | undefined 
 }
 
 /**
- * Given the DBL Berichtsumfang value (x030), returns whether consolidated-only
- * forms are applicable.
- * x02 = "Zusammengefasste Meldung"
- */
-export function isConsolidatedReporting(berichtsumfang: string | undefined): boolean {
-  return berichtsumfang === 'x02';
-}
-
-/**
- * Returns the applicability of a form given the current context.
- * 'required'    — must be submitted
- * 'conditional' — applies but condition not yet set in DBL
- * 'not_applicable' — condition is set and this form is excluded
+ * Returns the applicability of a form given institution master data.
+ * 'required'        — must be submitted
+ * 'conditional'     — institution data not yet available
+ * 'not_applicable'  — not required for this institution
  */
 export function getFormApplicability(
   code: string,
-  berichtsumfang: string | undefined
+  isConsolidated: boolean | undefined,
+  accountingStandard: AccountingStandard | undefined
 ): 'required' | 'conditional' | 'not_applicable' {
   const dep = getFormDependency(code);
-  if (!dep) return 'required'; // unknown forms treated as required
+  if (!dep) return 'required';
 
-  if (dep.requirement === 'always' || dep.requirement === 'per_steuerungskreis') {
-    return 'required';
+  switch (dep.requirement) {
+    case 'always':
+    case 'per_steuerungskreis':
+    case 'per_sk_barwertig':
+      return 'required';
+
+    case 'consolidated':
+      if (isConsolidated === undefined) return 'conditional';
+      return isConsolidated ? 'required' : 'not_applicable';
+
+    case 'per_sk_ifrs':
+      if (accountingStandard === undefined) return 'conditional';
+      return accountingStandard === 'ifrs' || accountingStandard === 'hgb_and_ifrs'
+        ? 'required'
+        : 'not_applicable';
+
+    case 'per_sk_hgb':
+      if (accountingStandard === undefined) return 'conditional';
+      return accountingStandard === 'hgb' || accountingStandard === 'hgb_and_ifrs'
+        ? 'required'
+        : 'not_applicable';
+
+    default:
+      return 'required';
   }
-
-  if (dep.requirement === 'consolidated') {
-    if (berichtsumfang === undefined) return 'conditional'; // DBL not yet filled in
-    return isConsolidatedReporting(berichtsumfang) ? 'required' : 'not_applicable';
-  }
-
-  return 'required';
 }

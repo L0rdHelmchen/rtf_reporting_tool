@@ -171,12 +171,6 @@ const Sidebar: React.FC = () => {
       icon: <People />,
       roles: ['admin', 'compliance_officer']
     },
-    {
-      id: 'settings',
-      label: 'Einstellungen',
-      path: '/settings',
-      icon: <Settings />
-    }
   ];
 
   const renderNavigationItem = (item: NavigationItem, level: number = 0) => {

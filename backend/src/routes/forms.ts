@@ -43,22 +43,25 @@ export default async function formRoutes(
    */
   fastify.get('/', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
+      const user = (request as any).user;
       const query = request.query as {
         category?: string;
         search?: string;
+        status?: string;
+        reportingPeriod?: string;
         page?: string;
         limit?: string;
       };
 
       let forms = [...schemaParser.getForms().values()];
 
-      // Filter by category (e.g. GRP, RSK, RDP, ILAAP, KPL, OTHER)
+      // Filter by category
       if (query.category) {
         const cat = query.category.toUpperCase();
         forms = forms.filter(f => getFormCategory(f.code) === cat);
       }
 
-      // Filter by search term (code or name)
+      // Filter by search term
       if (query.search) {
         const term = query.search.toLowerCase();
         forms = forms.filter(
@@ -66,35 +69,59 @@ export default async function formRoutes(
         );
       }
 
-      const formsWithMetadata = await Promise.all(
-        forms.map(async (form: import('../services/XBRLSchemaParser').FormDefinition) => {
-          const statistics = await generatorService.getFormStatistics(form.id);
-          const validationSummary = await validationService.getValidationSummary(form.id);
-
-          return {
-            formId: form.id,
-            code: form.code,
-            name: form.name,
-            version: form.version,
-            namespace: form.namespace,
-            description: `RTF Form ${form.code} - ${form.name}`,
-            sections: form.sections?.length || 0,
-            totalFields: statistics.totalFields,
-            requiredFields: statistics.requiredFields,
-            dimensionalFields: statistics.dimensionalFields,
-            dataTypes: statistics.dataTypes,
-            validationRules: {
-              total: validationSummary.applicableRules,
-              critical: validationSummary.criticalRules,
-              warnings: validationSummary.warningRules,
-              categories: validationSummary.categories
-            },
-            category: getFormCategory(form.code),
-            lastModified: '2023-12-31T00:00:00Z',
-            isActive: true
-          };
-        })
+      // Load all instances for this institution to get real status / last-modified
+      const instancesResult = await db.queryAs(user.id,
+        `SELECT form_code, status, reporting_period, updated_at, created_at
+         FROM form_instances
+         WHERE institution_id = $1
+         ORDER BY updated_at DESC`,
+        [user.institutionId]
       );
+
+      // Build a map: form.id (lowercase, matches DB form_code) → latest instance row
+      // DB stores internal taxonomy IDs e.g. "dbl", "de_sprv_tggrp1"
+      // form.id is the same lowercase internal ID; form.code is the display code e.g. "DBL", "GRP1"
+      const instanceMap = new Map<string, { status: string; reportingPeriod: string; updatedAt: string }>();
+      for (const row of instancesResult.rows) {
+        const code = String(row.form_code).toLowerCase();
+        if (!instanceMap.has(code)) {
+          instanceMap.set(code, {
+            status: row.status,
+            reportingPeriod: String(row.reporting_period).split('T')[0],
+            updatedAt: row.updated_at
+          });
+        }
+      }
+
+      // Filter by status — only keep forms that have an instance with the requested status
+      if (query.status) {
+        forms = forms.filter(f => {
+          const inst = instanceMap.get(f.id.toLowerCase());
+          return inst?.status === query.status;
+        });
+      }
+
+      // Filter by reportingPeriod
+      if (query.reportingPeriod) {
+        forms = forms.filter(f => {
+          const inst = instanceMap.get(f.id.toLowerCase());
+          return inst?.reportingPeriod === query.reportingPeriod;
+        });
+      }
+
+      const formsWithMetadata = forms.map((form: import('../services/XBRLSchemaParser').FormDefinition) => {
+        const inst = instanceMap.get(form.id.toLowerCase());
+        return {
+          formId: form.id,
+          code: form.code,
+          name: form.name,
+          version: form.version,
+          category: getFormCategory(form.code),
+          status: inst?.status ?? 'draft',
+          reportingPeriod: inst?.reportingPeriod ?? null,
+          lastModified: inst?.updatedAt ?? '2023-12-31T00:00:00Z',
+        };
+      });
 
       return reply.send({
         success: true,
